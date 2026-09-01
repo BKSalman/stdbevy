@@ -1,0 +1,15 @@
+{
+  "dev": {
+    "run": "cargo run -p client"
+  },
+  "server": "maincloud",
+  "database": "stdbevy-tu6vc",
+  "module-path": "./crates/server",
+  "generate": [
+    {
+      "language": "rust",
+      "out_dir": "./crates/client/src/module_bindings",
+      "module_path": "./crates/server"
+    }
+  ]
+}
