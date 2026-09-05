@@ -7,7 +7,11 @@ use bevy_stdb::prelude::*;
 #[derive(Clone, Eq, Hash, PartialEq, Debug)]
 pub enum SubKey {
     Player,
-    Circle,
+    Seat,
+    Game,
+    Deck,
+    PlayerHand,
+    PlayedCard,
 }
 
 // The SpacetimeDB connection resource
@@ -36,7 +40,9 @@ impl Plugin for MyStdbPlugin {
                 // You can register tables, views, and tables without PK using methods like this:
                 // add_view, add_table, add_table_without_pk
                 .add_table::<PlayerTableAccessor>()
-                .add_table::<CircleTableAccessor>()
+                .add_table::<SeatTableAccessor>()
+                .add_table::<PlayedCardTableAccessor>()
+                .add_view::<MyhandTableAccessor>()
                 // Typical case is using a background native driver, but there are others available for web or frame-driven
                 .with_background_driver(DbConnection::run_threaded),
         );

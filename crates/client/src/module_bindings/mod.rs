@@ -6,21 +6,47 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
-pub mod circle_table;
-pub mod circle_type;
-pub mod db_vector_2_type;
-pub mod move_all_players_timer_type;
+pub mod card_type;
+pub mod create_game_reducer;
+pub mod deck_type;
+pub mod enter_game_reducer;
+pub mod game_state_type;
+pub mod game_table;
+pub mod game_type;
+pub mod leave_game_reducer;
+pub mod myhand_table;
+pub mod play_card_reducer;
+pub mod played_card_table;
+pub mod played_card_type;
+pub mod player_hand_type;
 pub mod player_table;
 pub mod player_type;
-pub mod set_direction_reducer;
+pub mod rank_type;
+pub mod seat_table;
+pub mod seat_type;
+pub mod start_game_reducer;
+pub mod suit_type;
 
-pub use circle_table::*;
-pub use circle_type::Circle;
-pub use db_vector_2_type::DbVector2;
-pub use move_all_players_timer_type::MoveAllPlayersTimer;
+pub use card_type::Card;
+pub use create_game_reducer::create_game;
+pub use deck_type::Deck;
+pub use enter_game_reducer::enter_game;
+pub use game_state_type::GameState;
+pub use game_table::*;
+pub use game_type::Game;
+pub use leave_game_reducer::leave_game;
+pub use myhand_table::*;
+pub use play_card_reducer::play_card;
+pub use played_card_table::*;
+pub use played_card_type::PlayedCard;
+pub use player_hand_type::PlayerHand;
 pub use player_table::*;
 pub use player_type::Player;
-pub use set_direction_reducer::set_direction;
+pub use rank_type::Rank;
+pub use seat_table::*;
+pub use seat_type::Seat;
+pub use start_game_reducer::start_game;
+pub use suit_type::Suit;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -30,7 +56,11 @@ pub use set_direction_reducer::set_direction;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
-    SetDirection { direction: DbVector2 },
+    CreateGame,
+    EnterGame { game_id: u64 },
+    LeaveGame,
+    PlayCard { idx: u32 },
+    StartGame { game_id: u64 },
 }
 
 impl __sdk::InModule for Reducer {
@@ -40,16 +70,30 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
-            Reducer::SetDirection { .. } => "set_direction",
+            Reducer::CreateGame => "create_game",
+            Reducer::EnterGame { .. } => "enter_game",
+            Reducer::LeaveGame => "leave_game",
+            Reducer::PlayCard { .. } => "play_card",
+            Reducer::StartGame { .. } => "start_game",
             _ => unreachable!(),
         }
     }
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
-            Reducer::SetDirection { direction } => {
-                __sats::bsatn::to_vec(&set_direction_reducer::SetDirectionArgs {
-                    direction: direction.clone(),
+            Reducer::CreateGame => __sats::bsatn::to_vec(&create_game_reducer::CreateGameArgs {}),
+            Reducer::EnterGame { game_id } => {
+                __sats::bsatn::to_vec(&enter_game_reducer::EnterGameArgs {
+                    game_id: game_id.clone(),
+                })
+            }
+            Reducer::LeaveGame => __sats::bsatn::to_vec(&leave_game_reducer::LeaveGameArgs {}),
+            Reducer::PlayCard { idx } => {
+                __sats::bsatn::to_vec(&play_card_reducer::PlayCardArgs { idx: idx.clone() })
+            }
+            Reducer::StartGame { game_id } => {
+                __sats::bsatn::to_vec(&start_game_reducer::StartGameArgs {
+                    game_id: game_id.clone(),
                 })
             }
             _ => unreachable!(),
@@ -61,8 +105,11 @@ impl __sdk::Reducer for Reducer {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
-    circle: __sdk::TableUpdate<Circle>,
+    game: __sdk::TableUpdate<Game>,
+    myhand: __sdk::TableUpdate<PlayerHand>,
+    played_card: __sdk::TableUpdate<PlayedCard>,
     player: __sdk::TableUpdate<Player>,
+    seat: __sdk::TableUpdate<Seat>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -71,12 +118,21 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
-                "circle" => db_update
-                    .circle
-                    .append(circle_table::parse_table_update(table_update)?),
+                "game" => db_update
+                    .game
+                    .append(game_table::parse_table_update(table_update)?),
+                "myhand" => db_update
+                    .myhand
+                    .append(myhand_table::parse_table_update(table_update)?),
+                "played_card" => db_update
+                    .played_card
+                    .append(played_card_table::parse_table_update(table_update)?),
                 "player" => db_update
                     .player
                     .append(player_table::parse_table_update(table_update)?),
+                "seat" => db_update
+                    .seat
+                    .append(seat_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -103,12 +159,19 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
-        diff.circle = cache
-            .apply_diff_to_table::<Circle>("circle", &self.circle)
-            .with_updates_by_pk(|row| &row.player_id);
+        diff.game = cache
+            .apply_diff_to_table::<Game>("game", &self.game)
+            .with_updates_by_pk(|row| &row.id);
+        diff.played_card = cache
+            .apply_diff_to_table::<PlayedCard>("played_card", &self.played_card)
+            .with_updates_by_pk(|row| &row.id);
         diff.player = cache
             .apply_diff_to_table::<Player>("player", &self.player)
             .with_updates_by_pk(|row| &row.identity);
+        diff.seat = cache
+            .apply_diff_to_table::<Seat>("seat", &self.seat)
+            .with_updates_by_pk(|row| &row.id);
+        diff.myhand = cache.apply_diff_to_table::<PlayerHand>("myhand", &self.myhand);
 
         diff
     }
@@ -116,11 +179,20 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
-                "circle" => db_update
-                    .circle
+                "game" => db_update
+                    .game
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "myhand" => db_update
+                    .myhand
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "played_card" => db_update
+                    .played_card
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "player" => db_update
                     .player
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "seat" => db_update
+                    .seat
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -135,11 +207,20 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
-                "circle" => db_update
-                    .circle
+                "game" => db_update
+                    .game
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "myhand" => db_update
+                    .myhand
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "played_card" => db_update
+                    .played_card
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "player" => db_update
                     .player
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "seat" => db_update
+                    .seat
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -156,8 +237,11 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
-    circle: __sdk::TableAppliedDiff<'r, Circle>,
+    game: __sdk::TableAppliedDiff<'r, Game>,
+    myhand: __sdk::TableAppliedDiff<'r, PlayerHand>,
+    played_card: __sdk::TableAppliedDiff<'r, PlayedCard>,
     player: __sdk::TableAppliedDiff<'r, Player>,
+    seat: __sdk::TableAppliedDiff<'r, Seat>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -171,8 +255,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
-        callbacks.invoke_table_row_callbacks::<Circle>("circle", &self.circle, event);
+        callbacks.invoke_table_row_callbacks::<Game>("game", &self.game, event);
+        callbacks.invoke_table_row_callbacks::<PlayerHand>("myhand", &self.myhand, event);
+        callbacks.invoke_table_row_callbacks::<PlayedCard>("played_card", &self.played_card, event);
         callbacks.invoke_table_row_callbacks::<Player>("player", &self.player, event);
+        callbacks.invoke_table_row_callbacks::<Seat>("seat", &self.seat, event);
     }
 }
 
@@ -833,8 +920,12 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
-        circle_table::register_table(client_cache);
+        game_table::register_table(client_cache);
+        myhand_table::register_table(client_cache);
+        played_card_table::register_table(client_cache);
         player_table::register_table(client_cache);
+        seat_table::register_table(client_cache);
     }
-    const ALL_TABLE_NAMES: &'static [&'static str] = &["circle", "player"];
+    const ALL_TABLE_NAMES: &'static [&'static str] =
+        &["game", "myhand", "played_card", "player", "seat"];
 }

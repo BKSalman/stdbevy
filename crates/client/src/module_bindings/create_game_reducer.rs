@@ -4,50 +4,43 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
-use super::db_vector_2_type::DbVector2;
-
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct SetDirectionArgs {
-    pub direction: DbVector2,
-}
+pub(super) struct CreateGameArgs {}
 
-impl From<SetDirectionArgs> for super::Reducer {
-    fn from(args: SetDirectionArgs) -> Self {
-        Self::SetDirection {
-            direction: args.direction,
-        }
+impl From<CreateGameArgs> for super::Reducer {
+    fn from(args: CreateGameArgs) -> Self {
+        Self::CreateGame
     }
 }
 
-impl __sdk::InModule for SetDirectionArgs {
+impl __sdk::InModule for CreateGameArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `set_direction`.
+/// Extension trait for access to the reducer `create_game`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait set_direction {
-    /// Request that the remote module invoke the reducer `set_direction` to run as soon as possible.
+pub trait create_game {
+    /// Request that the remote module invoke the reducer `create_game` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`set_direction:set_direction_then`] to run a callback after the reducer completes.
-    fn set_direction(&self, direction: DbVector2) -> __sdk::Result<()> {
-        self.set_direction_then(direction, |_, _| {})
+    /// /// Use [`create_game:create_game_then`] to run a callback after the reducer completes.
+    fn create_game(&self) -> __sdk::Result<()> {
+        self.create_game_then(|_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `set_direction` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `create_game` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn set_direction_then(
+    fn create_game_then(
         &self,
-        direction: DbVector2,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -55,16 +48,15 @@ pub trait set_direction {
     ) -> __sdk::Result<()>;
 }
 
-impl set_direction for super::RemoteReducers {
-    fn set_direction_then(
+impl create_game for super::RemoteReducers {
+    fn create_game_then(
         &self,
-        direction: DbVector2,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(SetDirectionArgs { direction }, callback)
+            .invoke_reducer_with_callback(CreateGameArgs {}, callback)
     }
 }

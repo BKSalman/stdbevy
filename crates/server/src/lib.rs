@@ -1,208 +1,334 @@
-use std::time::Duration;
-
+use spacetimedb::rand::seq::SliceRandom;
 use spacetimedb::*;
 
-use crate::math::DbVector2;
+const CARDS_PER_PLAYER: usize = 5;
 
-mod math {
-    use spacetimedb::SpacetimeType;
+#[derive(SpacetimeType, Debug, Clone, Copy)]
+pub enum Rank {
+    Ace,
+    Two,
+    Three,
+    Four,
+    Five,
+    Six,
+    Seven,
+    Eight,
+    Nine,
+    Ten,
+    Jack,
+    Queen,
+    King,
+}
 
-    // This allows us to store 2D points in tables.
-    #[derive(SpacetimeType, Debug, Clone, Copy)]
-    pub struct DbVector2 {
-        pub x: f32,
-        pub y: f32,
-    }
+#[derive(SpacetimeType, Debug, Clone, Copy)]
+pub enum Suit {
+    Hearts,
+    Diamonds,
+    Clubs,
+    Spades,
+}
 
-    impl std::ops::Add<&DbVector2> for DbVector2 {
-        type Output = DbVector2;
+#[derive(SpacetimeType, Debug, Clone, Copy)]
+pub struct Card {
+    rank: Rank,
+    suit: Suit,
+}
 
-        fn add(self, other: &DbVector2) -> DbVector2 {
-            DbVector2 {
-                x: self.x + other.x,
-                y: self.y + other.y,
-            }
-        }
-    }
+impl Rank {
+    pub const ALL: [Rank; 13] = [
+        Rank::Ace,
+        Rank::Two,
+        Rank::Three,
+        Rank::Four,
+        Rank::Five,
+        Rank::Six,
+        Rank::Seven,
+        Rank::Eight,
+        Rank::Nine,
+        Rank::Ten,
+        Rank::Jack,
+        Rank::Queen,
+        Rank::King,
+    ];
+}
 
-    impl std::ops::Add<DbVector2> for DbVector2 {
-        type Output = DbVector2;
+impl Suit {
+    pub const ALL: [Suit; 4] = [Suit::Hearts, Suit::Diamonds, Suit::Clubs, Suit::Spades];
+}
 
-        fn add(self, other: DbVector2) -> DbVector2 {
-            DbVector2 {
-                x: self.x + other.x,
-                y: self.y + other.y,
-            }
-        }
-    }
-
-    impl std::ops::AddAssign<DbVector2> for DbVector2 {
-        fn add_assign(&mut self, rhs: DbVector2) {
-            self.x += rhs.x;
-            self.y += rhs.y;
-        }
-    }
-
-    impl std::iter::Sum<DbVector2> for DbVector2 {
-        fn sum<I: Iterator<Item = DbVector2>>(iter: I) -> Self {
-            let mut r = DbVector2::new(0.0, 0.0);
-            for val in iter {
-                r += val;
-            }
-            r
-        }
-    }
-
-    impl std::ops::Sub<&DbVector2> for DbVector2 {
-        type Output = DbVector2;
-
-        fn sub(self, other: &DbVector2) -> DbVector2 {
-            DbVector2 {
-                x: self.x - other.x,
-                y: self.y - other.y,
-            }
-        }
-    }
-
-    impl std::ops::Sub<DbVector2> for DbVector2 {
-        type Output = DbVector2;
-
-        fn sub(self, other: DbVector2) -> DbVector2 {
-            DbVector2 {
-                x: self.x - other.x,
-                y: self.y - other.y,
-            }
-        }
-    }
-
-    impl std::ops::SubAssign<DbVector2> for DbVector2 {
-        fn sub_assign(&mut self, rhs: DbVector2) {
-            self.x -= rhs.x;
-            self.y -= rhs.y;
-        }
-    }
-
-    impl std::ops::Mul<f32> for DbVector2 {
-        type Output = DbVector2;
-
-        fn mul(self, other: f32) -> DbVector2 {
-            DbVector2 {
-                x: self.x * other,
-                y: self.y * other,
-            }
-        }
-    }
-
-    impl std::ops::Div<f32> for DbVector2 {
-        type Output = DbVector2;
-
-        fn div(self, other: f32) -> DbVector2 {
-            if other != 0.0 {
-                DbVector2 {
-                    x: self.x / other,
-                    y: self.y / other,
-                }
-            } else {
-                DbVector2 { x: 0.0, y: 0.0 }
-            }
-        }
-    }
-
-    impl DbVector2 {
-        pub fn new(x: f32, y: f32) -> Self {
-            Self { x, y }
-        }
-
-        pub fn sqr_magnitude(&self) -> f32 {
-            self.x * self.x + self.y * self.y
-        }
-
-        pub fn magnitude(&self) -> f32 {
-            (self.x * self.x + self.y * self.y).sqrt()
-        }
-
-        pub fn normalized(self) -> DbVector2 {
-            self / self.magnitude()
-        }
+impl Card {
+    /// A fresh, unshuffled 52-card deck.
+    pub fn full_deck() -> Vec<Card> {
+        Suit::ALL
+            .into_iter()
+            .flat_map(|suit| Rank::ALL.into_iter().map(move |rank| Card { rank, suit }))
+            .collect()
     }
 }
 
+// TODO: add `OfflinePlayer` or something instead of deleting the player
 #[spacetimedb::table(accessor = player, public)]
 pub struct Player {
     #[primary_key]
     pub identity: Identity,
 }
 
-#[spacetimedb::table(accessor = circle, public)]
-#[derive(Debug)]
-pub struct Circle {
-    #[primary_key]
-    pub player_id: Identity,
-    pub position: DbVector2,
-    pub direction: DbVector2,
-    pub speed: f32,
+#[derive(SpacetimeType, Debug, Clone, Copy)]
+pub enum GameState {
+    Lobby,
+    Playing,
+    Ended,
 }
 
-#[spacetimedb::table(accessor = move_all_players_timer, scheduled(move_all_players))]
-pub struct MoveAllPlayersTimer {
+#[spacetimedb::table(accessor = game, public)]
+pub struct Game {
     #[primary_key]
     #[auto_inc]
-    scheduled_id: u64,
-    scheduled_at: spacetimedb::ScheduleAt,
+    pub id: u64,
+    pub state: GameState,
+    pub current_seat: u8,
 }
 
-const SPEED: f32 = 50.0;
+#[spacetimedb::table(accessor = seat, public, index(accessor = game_position, btree(columns = [game_id, position])))]
+pub struct Seat {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[unique]
+    pub player_id: Identity,
+    #[index(btree)]
+    pub game_id: u64,
+    pub position: u8, // 0..3, turn order
+    pub card_count: u32,
+}
 
-#[spacetimedb::reducer]
-pub fn move_all_players(ctx: &ReducerContext, _timer: MoveAllPlayersTimer) -> Result<(), String> {
-    for mut circle in ctx.db.circle().iter() {
-        let vel = circle.direction * circle.speed;
-        let new_pos = circle.position + vel * SPEED;
-        circle.position.x = new_pos.x;
-        circle.position.y = new_pos.y;
-        ctx.db.circle().player_id().update(circle);
-    }
+#[spacetimedb::table(accessor = player_hand)]
+pub struct PlayerHand {
+    #[primary_key]
+    pub seat_id: u64,
+    #[unique]
+    pub player_id: Identity,
+    #[index(btree)]
+    pub game_id: u64,
+    pub cards: Vec<Card>,
+}
 
-    Ok(())
+#[spacetimedb::table(accessor = deck)]
+pub struct Deck {
+    #[primary_key]
+    pub game_id: u64,
+    pub cards: Vec<Card>,
+}
+
+#[spacetimedb::table(accessor = played_card, public)]
+pub struct PlayedCard {
+    #[primary_key]
+    #[auto_inc]
+    pub id: u64,
+    #[index(btree)]
+    pub game_id: u64,
+    pub seat_id: u64,
+    pub card: Card,
 }
 
 #[spacetimedb::reducer(init)]
 pub fn init(ctx: &ReducerContext) -> Result<(), String> {
     log::debug!("Initializing...");
-
-    ctx.db
-        .move_all_players_timer()
-        .try_insert(MoveAllPlayersTimer {
-            scheduled_id: 0,
-            scheduled_at: ScheduleAt::Interval(Duration::from_millis(50).into()),
-        })?;
     Ok(())
 }
 
 #[spacetimedb::reducer(client_connected)]
 pub fn identity_connected(ctx: &ReducerContext) {
-    let player = ctx.db.player().insert(Player {
-        identity: ctx.sender(),
-    });
-
-    ctx.db.circle().insert(Circle {
-        player_id: player.identity,
-        position: DbVector2::new(0., 0.),
-        direction: DbVector2::new(0., 0.),
-        speed: 0.,
-    });
+    ctx.db
+        .player()
+        .try_insert(Player {
+            identity: ctx.sender(),
+        })
+        .ok();
 }
 
 #[spacetimedb::reducer(client_disconnected)]
 pub fn identity_disconnected(ctx: &ReducerContext) {
+    // TODO: wait for timeout before deleting the player
     ctx.db.player().identity().delete(ctx.sender());
+    ctx.db.seat().player_id().delete(ctx.sender());
+    ctx.db.player_hand().player_id().delete(ctx.sender());
 }
 
-#[reducer]
-pub fn set_direction(ctx: &ReducerContext, direction: DbVector2) {
-    if let Some(mut circle) = ctx.db.circle().player_id().find(ctx.sender()) {
-        circle.direction = direction.normalized();
-        circle.speed = direction.magnitude().clamp(0., 1.);
-        ctx.db.circle().player_id().update(circle);
+#[spacetimedb::reducer]
+pub fn create_game(ctx: &ReducerContext) -> Result<(), String> {
+    if let Some(player) = ctx.db.player().identity().find(ctx.sender()) {
+        let game = ctx.db.game().insert(Game {
+            id: 0,
+            state: GameState::Lobby,
+            current_seat: 0,
+        });
+
+        ctx.db.seat().try_insert(Seat {
+            id: 0,
+            player_id: player.identity,
+            game_id: game.id,
+            card_count: 0,
+            position: 0,
+        })?;
     }
+
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn enter_game(ctx: &ReducerContext, game_id: u64) -> Result<(), String> {
+    if let Some(player) = ctx.db.player().identity().find(ctx.sender())
+        && let Some(game) = ctx.db.game().id().find(game_id)
+    {
+        let seats = ctx.db.seat().game_id().filter(game_id).count();
+        match game.state {
+            GameState::Lobby => {
+                if seats < 4 {
+                    ctx.db.seat().try_insert(Seat {
+                        id: 0,
+                        player_id: player.identity,
+                        game_id,
+                        card_count: 0,
+                        position: seats as u8,
+                    })?;
+                } else {
+                    return Err(String::from("game is full"));
+                }
+            }
+            GameState::Playing => return Err(String::from("game already started")),
+            GameState::Ended => return Err(String::from("game ended")),
+        }
+    }
+
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn leave_game(ctx: &ReducerContext) -> Result<(), String> {
+    let Some(leaving_seat) = ctx.db.seat().player_id().find(ctx.sender()) else {
+        return Err(String::from("player is not in a game"));
+    };
+    let Some(game) = ctx.db.game().id().find(leaving_seat.game_id) else {
+        return Err(String::from("game not found"));
+    };
+    if !matches!(game.state, GameState::Lobby) {
+        return Err(String::from("cannot leave a game in progress"));
+    }
+
+    let seats: Vec<_> = ctx
+        .db
+        .seat()
+        .game_position()
+        .filter((game.id, (leaving_seat.position + 1)..))
+        .collect();
+
+    for seat in seats {
+        ctx.db.seat().id().update(Seat {
+            position: seat.position - 1,
+            ..seat
+        });
+    }
+    ctx.db.seat().id().delete(leaving_seat.id);
+
+    if ctx.db.seat().game_id().filter(leaving_seat.game_id).count() == 0 {
+        ctx.db.game().id().delete(leaving_seat.game_id);
+    }
+
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn start_game(ctx: &ReducerContext, game_id: u64) -> Result<(), String> {
+    let Some(mut game) = ctx.db.game().id().find(game_id) else {
+        return Err(String::from("game not found"));
+    };
+
+    if !matches!(game.state, GameState::Lobby) {
+        return Err(String::from("game already started"));
+    }
+
+    let mut seats: Vec<Seat> = ctx.db.seat().game_id().filter(game.id).collect();
+    if seats.len() != 4 {
+        return Err(String::from("game needs 4 players to start"));
+    }
+    seats.sort_by_key(|seat| seat.position);
+
+    let mut cards = Card::full_deck();
+    cards.shuffle(&mut ctx.rng());
+
+    for seat in seats {
+        let hand = cards.split_off(cards.len() - CARDS_PER_PLAYER);
+
+        ctx.db.player_hand().insert(PlayerHand {
+            seat_id: seat.id,
+            player_id: seat.player_id,
+            game_id,
+            cards: hand,
+        });
+        ctx.db.seat().id().update(Seat {
+            card_count: CARDS_PER_PLAYER as u32,
+            ..seat
+        });
+    }
+
+    // whatever is left after dealing is the draw pile
+    ctx.db.deck().insert(Deck { game_id, cards });
+
+    game.state = GameState::Playing;
+    ctx.db.game().id().update(game);
+
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn play_card(ctx: &ReducerContext, idx: u32) -> Result<(), String> {
+    let Some(seat) = ctx.db.seat().player_id().find(ctx.sender()) else {
+        return Err(String::from("player doesn't have a seat"));
+    };
+    let Some(mut game) = ctx.db.game().id().find(seat.game_id) else {
+        return Err(String::from("player is not in a game"));
+    };
+
+    if !matches!(game.state, GameState::Playing) {
+        return Err(String::from("game is not in progress"));
+    }
+
+    if game.current_seat != seat.position {
+        return Err(String::from("not your turn"));
+    }
+
+    let Some(mut player_hand) = ctx.db.player_hand().seat_id().find(seat.id) else {
+        return Err(String::from("player doesn't have a playing hand"));
+    };
+
+    if idx as usize >= player_hand.cards.len() {
+        return Err(String::from("no card with provided index"));
+    }
+
+    let card = player_hand.cards.remove(idx as usize);
+
+    ctx.db.played_card().insert(PlayedCard {
+        id: 0,
+        game_id: seat.game_id,
+        seat_id: seat.id,
+        card,
+    });
+
+    ctx.db.player_hand().seat_id().update(player_hand);
+
+    ctx.db.seat().id().update(Seat {
+        card_count: seat.card_count - 1,
+        ..seat
+    });
+
+    game.current_seat = (game.current_seat + 1) % 4;
+    ctx.db.game().id().update(game);
+
+    Ok(())
+}
+
+#[spacetimedb::view(accessor = myhand, public)]
+pub fn myhand(ctx: &ViewContext) -> Option<PlayerHand> {
+    ctx.db.player_hand().player_id().find(ctx.sender())
 }
