@@ -41,6 +41,7 @@ impl Plugin for MyStdbPlugin {
                 // add_view, add_table, add_table_without_pk
                 .add_table::<PlayerTableAccessor>()
                 .add_table::<SeatTableAccessor>()
+                .add_table::<GameTableAccessor>()
                 .add_table::<PlayedCardTableAccessor>()
                 .add_view::<MyhandTableAccessor>()
                 // Typical case is using a background native driver, but there are others available for web or frame-driven

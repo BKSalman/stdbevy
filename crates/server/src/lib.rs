@@ -178,27 +178,31 @@ pub fn create_game(ctx: &ReducerContext) -> Result<(), String> {
 
 #[spacetimedb::reducer]
 pub fn enter_game(ctx: &ReducerContext, game_id: u64) -> Result<(), String> {
-    if let Some(player) = ctx.db.player().identity().find(ctx.sender())
-        && let Some(game) = ctx.db.game().id().find(game_id)
-    {
-        let seats = ctx.db.seat().game_id().filter(game_id).count();
-        match game.state {
-            GameState::Lobby => {
-                if seats < 4 {
-                    ctx.db.seat().try_insert(Seat {
-                        id: 0,
-                        player_id: player.identity,
-                        game_id,
-                        card_count: 0,
-                        position: seats as u8,
-                    })?;
-                } else {
-                    return Err(String::from("game is full"));
-                }
+    let Some(player) = ctx.db.player().identity().find(ctx.sender()) else {
+        return Err(String::from("play not found"));
+    };
+
+    let Some(game) = ctx.db.game().id().find(game_id) else {
+        return Err(String::from("game not found"));
+    };
+
+    let seats = ctx.db.seat().game_id().filter(game_id).count();
+    match game.state {
+        GameState::Lobby => {
+            if seats < 4 {
+                ctx.db.seat().try_insert(Seat {
+                    id: 0,
+                    player_id: player.identity,
+                    game_id,
+                    card_count: 0,
+                    position: seats as u8,
+                })?;
+            } else {
+                return Err(String::from("game is full"));
             }
-            GameState::Playing => return Err(String::from("game already started")),
-            GameState::Ended => return Err(String::from("game ended")),
         }
+        GameState::Playing => return Err(String::from("game already started")),
+        GameState::Ended => return Err(String::from("game ended")),
     }
 
     Ok(())

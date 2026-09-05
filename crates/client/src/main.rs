@@ -2,14 +2,15 @@ mod cards;
 mod module_bindings;
 mod stdb;
 
-use bevy::{prelude::*, text::FontSourceTemplate};
+use bevy::prelude::*;
 use bevy_stdb::prelude::*;
-use spacetimedb_sdk::Identity;
+use spacetimedb_sdk::{Identity, table::TableLike};
 
 use stdb::*;
 
 use crate::module_bindings::{
-    Player, create_game, gameQueryTableAccess, myhandQueryTableAccess, played_cardQueryTableAccess,
+    Game, GameTableAccess, Player, Seat, SeatTableAccess, create_game, enter_game,
+    gameQueryTableAccess, myhandQueryTableAccess, played_cardQueryTableAccess,
     playerQueryTableAccess, seatQueryTableAccess,
 };
 
@@ -26,6 +27,23 @@ pub struct LocalPlayer(Identity);
 pub struct NetTransform {
     x: f32,
     y: f32,
+}
+
+#[derive(Resource, Debug, Default, Clone)]
+pub struct CurrentGame(u64);
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct GamesListRoot;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct PlayersListRoot;
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+enum AppState {
+    #[default]
+    MainMenu,
+    InLobby,
+    InGame,
 }
 
 fn main() -> AppExit {
@@ -47,17 +65,32 @@ impl Plugin for AppPlugin {
             }),
         );
 
+        app.init_state::<AppState>();
+
         app.add_plugins(MyStdbPlugin);
 
         app.add_systems(Startup, spawn_camera);
 
-        app.add_systems(Startup, create_game_ui.spawn());
+        app.add_systems(OnEnter(AppState::MainMenu), spawn_main_menu_ui);
+        app.add_systems(OnEnter(AppState::InLobby), spawn_in_lobby_ui);
 
         app.add_systems(
             PreUpdate,
-            (subscribe_on_connect, animate_played_card, despawn_player)
-                .run_if(resource_exists::<StdbConn>),
+            (refresh_games_list,)
+                .run_if(resource_exists::<StdbConn>.and_then(in_state(AppState::MainMenu))),
         );
+
+        app.add_systems(
+            PreUpdate,
+            (refresh_players_list,)
+                .run_if(resource_exists::<StdbConn>.and_then(in_state(AppState::InLobby))),
+        );
+
+        app.add_systems(
+            PreUpdate,
+            (subscribe_on_connect, despawn_player).run_if(resource_exists::<StdbConn>),
+        );
+
         app.add_systems(
             PreUpdate,
             spawn_player.run_if(resource_exists::<LocalPlayer>),
@@ -65,12 +98,12 @@ impl Plugin for AppPlugin {
     }
 }
 
-fn button(label: &str) -> impl Scene {
+fn button(label: impl Into<String>) -> impl Scene {
+    let label: String = label.into();
     bsn! {
         Button
         Node {
-            width: px(150),
-            height: px(65),
+            padding: px(10),
             border: px(5),
             border_radius: BorderRadius::MAX,
             justify_content: JustifyContent::Center,
@@ -80,10 +113,6 @@ fn button(label: &str) -> impl Scene {
         BackgroundColor(Color::srgb(0.15, 0.15, 0.15))
         Children [(
             Text(label)
-            // TextFont {
-            //     font: FontSourceTemplate::Handle("fonts/FiraSans-Bold.ttf"),
-            //     font_size: px(33.0),
-            // }
             TextColor(Color::srgb(0.9, 0.9, 0.9))
             TextShadow
         )]
@@ -110,15 +139,134 @@ fn button(label: &str) -> impl Scene {
     }
 }
 
-fn create_game_ui(conn: Res<StdbConn>) -> impl Scene {
+fn spawn_in_lobby_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
+    commands
+        .spawn_scene(players_list(current_game.0))
+        .insert(DespawnOnExit(AppState::InLobby));
+}
+
+fn players_list(game_id: u64) -> impl Scene {
+    bsn! {
+        Node {
+            flex_direction: FlexDirection::Column,
+            top: px(80),
+            row_gap: px(10),
+        }
+        Children [
+            Text::new(format!("game: #{game_id}")),
+            (
+                PlayersListRoot
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(10),
+                }
+            ),
+        ]
+    }
+}
+
+fn refresh_players_list(
+    mut commands: Commands,
+    conn: Res<StdbConn>,
+    root: Single<Entity, With<PlayersListRoot>>,
+    mut inserts: ReadInsertUpdateMessage<Seat>,
+    mut deletes: ReadDeleteMessage<Seat>,
+) {
+    // `+` rather than `||` so both readers are always drained
+    if inserts.read().count() + deletes.read().count() == 0 {
+        return;
+    }
+
+    let rows: Vec<_> = conn.db().seat().iter().map(seat_row).collect();
+
+    commands
+        .entity(*root)
+        .despawn_related::<Children>()
+        .queue_spawn_related_scenes::<Children>(rows);
+}
+
+fn seat_row(seat: Seat) -> impl Scene {
+    let seat_id = seat.id;
+    let game_id = seat.game_id;
+    bsn! {
+        Node {
+            flex_direction: FlexDirection::Column,
+        }
+        Children [
+            Text::new(format!("seat: #{seat_id}")),
+        ]
+    }
+}
+
+fn spawn_main_menu_ui(mut commands: Commands) {
+    commands
+        .spawn_scene(create_game_ui())
+        .insert(DespawnOnExit(AppState::MainMenu));
+    commands
+        .spawn_scene(games_list_ui())
+        .insert(DespawnOnExit(AppState::MainMenu));
+}
+
+fn create_game_ui() -> impl Scene {
     bsn! {
         (
             button("Create a game")
-            on(|_event: On<Pointer<Press>>| {
+            on(|_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
                 conn.reducers().create_game().ok();
             })
         )
     }
+}
+
+fn games_list_ui() -> impl Scene {
+    bsn! {
+        GamesListRoot
+        Node {
+            flex_direction: FlexDirection::Column,
+            top: px(80),
+            row_gap: px(10),
+        }
+    }
+}
+
+fn game_row(game: Game) -> impl Scene {
+    let game_id = game.id;
+    bsn! {
+        (
+            button(format!("Join game #{game_id}"))
+            on(move |_event: On<Pointer<Press>>, mut subs: ResMut<StdbSubs>, conn: Res<StdbConn>, mut commands: Commands| {
+                if conn.reducers().enter_game(game_id).is_ok() {
+                    subs.subscribe_query(SubKey::Seat, |q| q.from.seat().r#where(|s| s.game_id.eq(game_id)));
+                    subs.subscribe_query(SubKey::PlayedCard, |q| q.from.played_card().r#where(|pc| pc.game_id.eq(game_id)));
+                    // XXX: is this needed?
+                    subs.subscribe_query(SubKey::PlayerHand, |q| q.from.myhand().r#where(|myhand| myhand.game_id.eq(game_id)));
+
+                    commands.insert_resource(CurrentGame(game_id));
+                    commands.set_state(AppState::InLobby);
+                }
+            })
+        )
+    }
+}
+
+fn refresh_games_list(
+    mut commands: Commands,
+    conn: Res<StdbConn>,
+    root: Single<Entity, With<GamesListRoot>>,
+    mut inserts: ReadInsertUpdateMessage<Game>,
+    mut deletes: ReadDeleteMessage<Game>,
+) {
+    // `+` rather than `||` so both readers are always drained
+    if inserts.read().count() + deletes.read().count() == 0 {
+        return;
+    }
+
+    let rows: Vec<_> = conn.db().game().iter().map(game_row).collect();
+
+    commands
+        .entity(*root)
+        .despawn_related::<Children>()
+        .queue_spawn_related_scenes::<Children>(rows);
 }
 
 fn spawn_camera(mut commands: Commands) {
@@ -134,10 +282,7 @@ fn subscribe_on_connect(
         info!("connected as {:?}", msg.identity);
         commands.insert_resource(LocalPlayer(msg.identity));
         subs.subscribe_query(SubKey::Player, |q| q.from.player());
-        subs.subscribe_query(SubKey::Seat, |q| q.from.seat());
         subs.subscribe_query(SubKey::Game, |q| q.from.game());
-        subs.subscribe_query(SubKey::PlayedCard, |q| q.from.played_card());
-        subs.subscribe_query(SubKey::PlayerHand, |q| q.from.myhand());
     }
 }
 
@@ -162,20 +307,6 @@ fn despawn_player(
         for (entity, marker) in &players {
             if marker.0 == msg.row.identity {
                 commands.entity(entity).despawn();
-            }
-        }
-    }
-}
-
-fn animate_played_card(
-    mut players: Query<(&SeatId, &mut NetTransform)>,
-    mut msgs: ReadUpdateMessage<module_bindings::PlayedCard>,
-) {
-    for msg in msgs.read() {
-        msg.new.seat_id;
-        for (seat_id, mut net) in &mut players {
-            if seat_id.0 == msg.new.seat_id {
-                // TODO: animate
             }
         }
     }
