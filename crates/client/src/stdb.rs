@@ -7,6 +7,7 @@ use bevy_stdb::prelude::*;
 #[derive(Clone, Eq, Hash, PartialEq, Debug)]
 pub enum SubKey {
     Player,
+    MySeat,
     Seat,
     Game,
     Deck,

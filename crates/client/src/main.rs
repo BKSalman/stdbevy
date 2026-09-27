@@ -1,6 +1,7 @@
 mod cards;
 mod module_bindings;
 mod stdb;
+mod table_list;
 
 use bevy::prelude::*;
 use bevy_stdb::prelude::*;
@@ -8,10 +9,13 @@ use spacetimedb_sdk::{Identity, table::TableLike};
 
 use stdb::*;
 
-use crate::module_bindings::{
-    Game, GameTableAccess, Player, Seat, SeatTableAccess, create_game, enter_game,
-    gameQueryTableAccess, myhandQueryTableAccess, played_cardQueryTableAccess,
-    playerQueryTableAccess, seatQueryTableAccess,
+use crate::{
+    module_bindings::{
+        Game, GameTableAccessor, Player, Seat, SeatTableAccessor, create_game, enter_game,
+        gameQueryTableAccess, myhandQueryTableAccess, played_cardQueryTableAccess,
+        playerQueryTableAccess, seatQueryTableAccess,
+    },
+    table_list::{TableList, TableListPlugin},
 };
 
 #[derive(Component, Debug, Default)]
@@ -74,17 +78,10 @@ impl Plugin for AppPlugin {
         app.add_systems(OnEnter(AppState::MainMenu), spawn_main_menu_ui);
         app.add_systems(OnEnter(AppState::InLobby), spawn_in_lobby_ui);
 
-        app.add_systems(
-            PreUpdate,
-            (refresh_games_list,)
-                .run_if(resource_exists::<StdbConn>.and_then(in_state(AppState::MainMenu))),
-        );
-
-        app.add_systems(
-            PreUpdate,
-            (refresh_players_list,)
-                .run_if(resource_exists::<StdbConn>.and_then(in_state(AppState::InLobby))),
-        );
+        app.add_plugins((
+            TableListPlugin::<Game>::default(),
+            TableListPlugin::<Seat>::default(),
+        ));
 
         app.add_systems(
             PreUpdate,
@@ -93,7 +90,12 @@ impl Plugin for AppPlugin {
 
         app.add_systems(
             PreUpdate,
-            spawn_player.run_if(resource_exists::<LocalPlayer>),
+            (
+                spawn_player,
+                enter_lobby_when_seated,
+                exit_lobby_when_unseated,
+            )
+                .run_if(resource_exists::<LocalPlayer>),
         );
     }
 }
@@ -141,6 +143,16 @@ fn button(label: impl Into<String>) -> impl Scene {
 
 fn spawn_in_lobby_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
     commands
+        .spawn_scene(bsn! {
+            button("Leave game")
+            on(|_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
+                if let Err(err) = conn.reducers().leave_game() {
+                    error!("could not request leave_game: {err}");
+                }
+            })
+        })
+        .insert(DespawnOnExit(AppState::InLobby));
+    commands
         .spawn_scene(players_list(current_game.0))
         .insert(DespawnOnExit(AppState::InLobby));
 }
@@ -165,36 +177,25 @@ fn players_list(game_id: u64) -> impl Scene {
     }
 }
 
-fn refresh_players_list(
-    mut commands: Commands,
-    conn: Res<StdbConn>,
-    root: Single<Entity, With<PlayersListRoot>>,
-    mut inserts: ReadInsertUpdateMessage<Seat>,
-    mut deletes: ReadDeleteMessage<Seat>,
-) {
-    // `+` rather than `||` so both readers are always drained
-    if inserts.read().count() + deletes.read().count() == 0 {
-        return;
+impl TableList for Seat {
+    type Accessor = SeatTableAccessor;
+    type Root = PlayersListRoot;
+    type Order = u64;
+
+    fn order(&self) -> u64 {
+        self.id
     }
 
-    let rows: Vec<_> = conn.db().seat().iter().map(seat_row).collect();
-
-    commands
-        .entity(*root)
-        .despawn_related::<Children>()
-        .queue_spawn_related_scenes::<Children>(rows);
-}
-
-fn seat_row(seat: Seat) -> impl Scene {
-    let seat_id = seat.id;
-    let game_id = seat.game_id;
-    bsn! {
-        Node {
-            flex_direction: FlexDirection::Column,
+    fn row(self) -> impl Scene {
+        let seat_id = self.id;
+        bsn! {
+            Node {
+                flex_direction: FlexDirection::Column,
+            }
+            Children [
+                Text::new(format!("seat: #{seat_id}")),
+            ]
         }
-        Children [
-            Text::new(format!("seat: #{seat_id}")),
-        ]
     }
 }
 
@@ -212,7 +213,9 @@ fn create_game_ui() -> impl Scene {
         (
             button("Create a game")
             on(|_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
-                conn.reducers().create_game().ok();
+                if let Err(err) = conn.reducers().create_game() {
+                    error!("could not request create_game: {err}");
+                }
             })
         )
     }
@@ -229,44 +232,28 @@ fn games_list_ui() -> impl Scene {
     }
 }
 
-fn game_row(game: Game) -> impl Scene {
-    let game_id = game.id;
-    bsn! {
-        (
-            button(format!("Join game #{game_id}"))
-            on(move |_event: On<Pointer<Press>>, mut subs: ResMut<StdbSubs>, conn: Res<StdbConn>, mut commands: Commands| {
-                if conn.reducers().enter_game(game_id).is_ok() {
-                    subs.subscribe_query(SubKey::Seat, |q| q.from.seat().r#where(|s| s.game_id.eq(game_id)));
-                    subs.subscribe_query(SubKey::PlayedCard, |q| q.from.played_card().r#where(|pc| pc.game_id.eq(game_id)));
-                    // XXX: is this needed?
-                    subs.subscribe_query(SubKey::PlayerHand, |q| q.from.myhand().r#where(|myhand| myhand.game_id.eq(game_id)));
+impl TableList for Game {
+    type Accessor = GameTableAccessor;
+    type Root = GamesListRoot;
+    type Order = u64;
 
-                    commands.insert_resource(CurrentGame(game_id));
-                    commands.set_state(AppState::InLobby);
-                }
-            })
-        )
-    }
-}
-
-fn refresh_games_list(
-    mut commands: Commands,
-    conn: Res<StdbConn>,
-    root: Single<Entity, With<GamesListRoot>>,
-    mut inserts: ReadInsertUpdateMessage<Game>,
-    mut deletes: ReadDeleteMessage<Game>,
-) {
-    // `+` rather than `||` so both readers are always drained
-    if inserts.read().count() + deletes.read().count() == 0 {
-        return;
+    fn order(&self) -> u64 {
+        self.id
     }
 
-    let rows: Vec<_> = conn.db().game().iter().map(game_row).collect();
-
-    commands
-        .entity(*root)
-        .despawn_related::<Children>()
-        .queue_spawn_related_scenes::<Children>(rows);
+    fn row(self) -> impl Scene {
+        let game_id = self.id;
+        bsn! {
+            (
+                button(format!("Join game #{game_id}"))
+                on(move |_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
+                    if let Err(err) = conn.reducers().enter_game(game_id) {
+                        error!("could not request enter_game: {err}");
+                    }
+                })
+            )
+        }
+    }
 }
 
 fn spawn_camera(mut commands: Commands) {
@@ -283,6 +270,59 @@ fn subscribe_on_connect(
         commands.insert_resource(LocalPlayer(msg.identity));
         subs.subscribe_query(SubKey::Player, |q| q.from.player());
         subs.subscribe_query(SubKey::Game, |q| q.from.game());
+
+        let me = msg.identity;
+        subs.subscribe_query(SubKey::MySeat, move |q| {
+            q.from.seat().r#where(|s| s.player_id.eq(me))
+        });
+    }
+}
+
+fn enter_lobby_when_seated(
+    mut commands: Commands,
+    local: Res<LocalPlayer>,
+    mut subs: ResMut<StdbSubs>,
+    mut seats: ReadInsertMessage<Seat>,
+) {
+    for msg in seats.read() {
+        if msg.row.player_id != local.0 {
+            continue;
+        }
+
+        let game_id = msg.row.game_id;
+        subs.subscribe_query(SubKey::Seat, move |q| {
+            q.from.seat().r#where(|s| s.game_id.eq(game_id))
+        });
+        subs.subscribe_query(SubKey::PlayedCard, move |q| {
+            q.from.played_card().r#where(|pc| pc.game_id.eq(game_id))
+        });
+        // XXX: is this needed?
+        subs.subscribe_query(SubKey::PlayerHand, move |q| {
+            q.from.myhand().r#where(|myhand| myhand.game_id.eq(game_id))
+        });
+
+        commands.insert_resource(CurrentGame(game_id));
+        commands.set_state(AppState::InLobby);
+    }
+}
+
+fn exit_lobby_when_unseated(
+    mut commands: Commands,
+    local: Res<LocalPlayer>,
+    mut subs: ResMut<StdbSubs>,
+    mut seats: ReadDeleteMessage<Seat>,
+) {
+    for msg in seats.read() {
+        if msg.row.player_id != local.0 {
+            continue;
+        }
+
+        subs.unsubscribe(&SubKey::Seat).ok();
+        subs.unsubscribe(&SubKey::PlayedCard).ok();
+        subs.unsubscribe(&SubKey::PlayerHand).ok();
+
+        commands.remove_resource::<CurrentGame>();
+        commands.set_state(AppState::MainMenu);
     }
 }
 
