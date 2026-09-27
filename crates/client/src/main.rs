@@ -4,18 +4,17 @@ mod stdb;
 mod table_list;
 
 use bevy::prelude::*;
+use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 use bevy_stdb::prelude::*;
-use spacetimedb_sdk::{Identity, table::TableLike};
+use spacetimedb_sdk::Identity;
 
 use stdb::*;
+use table_list::{TableList, TableListPlugin};
 
-use crate::{
-    module_bindings::{
-        Game, GameTableAccessor, Player, Seat, SeatTableAccessor, create_game, enter_game,
-        gameQueryTableAccess, myhandQueryTableAccess, played_cardQueryTableAccess,
-        playerQueryTableAccess, seatQueryTableAccess,
-    },
-    table_list::{TableList, TableListPlugin},
+use crate::module_bindings::{
+    Game, GameTableAccessor, Player, Seat, SeatTableAccessor, create_game, enter_game,
+    gameQueryTableAccess, leave_game, myhandQueryTableAccess, played_cardQueryTableAccess,
+    playerQueryTableAccess, seatQueryTableAccess,
 };
 
 #[derive(Component, Debug, Default)]
@@ -33,7 +32,7 @@ pub struct NetTransform {
     y: f32,
 }
 
-#[derive(Resource, Debug, Default, Clone)]
+#[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct CurrentGame(u64);
 
 #[derive(Component, Debug, Default, Clone)]
@@ -67,7 +66,9 @@ impl Plugin for AppPlugin {
                 .into(),
                 ..default()
             }),
-        );
+        )
+        .add_plugins(EguiPlugin::default())
+        .add_plugins(WorldInspectorPlugin::new());
 
         app.init_state::<AppState>();
 

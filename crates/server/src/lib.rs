@@ -89,6 +89,7 @@ pub struct Game {
     pub current_seat: u8,
 }
 
+#[derive(Debug)]
 #[spacetimedb::table(accessor = seat, public, index(accessor = game_position, btree(columns = [game_id, position])))]
 pub struct Seat {
     #[primary_key]
@@ -150,28 +151,34 @@ pub fn identity_connected(ctx: &ReducerContext) {
 #[spacetimedb::reducer(client_disconnected)]
 pub fn identity_disconnected(ctx: &ReducerContext) {
     // TODO: wait for timeout before deleting the player
-    ctx.db.player().identity().delete(ctx.sender());
-    ctx.db.seat().player_id().delete(ctx.sender());
+    if let Some(leaving_seat) = ctx.db.seat().player_id().find(ctx.sender()) {
+        if ctx.db.seat().game_id().filter(leaving_seat.game_id).count() == 1 {
+            ctx.db.game().id().delete(leaving_seat.game_id);
+        }
+    }
     ctx.db.player_hand().player_id().delete(ctx.sender());
+    ctx.db.seat().player_id().delete(ctx.sender());
+    ctx.db.player().identity().delete(ctx.sender());
 }
 
 #[spacetimedb::reducer]
 pub fn create_game(ctx: &ReducerContext) -> Result<(), String> {
-    if let Some(player) = ctx.db.player().identity().find(ctx.sender()) {
-        let game = ctx.db.game().insert(Game {
-            id: 0,
-            state: GameState::Lobby,
-            current_seat: 0,
-        });
+    let Some(player) = ctx.db.player().identity().find(ctx.sender()) else {
+        return Err(String::from(""));
+    };
+    let game = ctx.db.game().insert(Game {
+        id: 0,
+        state: GameState::Lobby,
+        current_seat: 0,
+    });
 
-        ctx.db.seat().try_insert(Seat {
-            id: 0,
-            player_id: player.identity,
-            game_id: game.id,
-            card_count: 0,
-            position: 0,
-        })?;
-    }
+    ctx.db.seat().try_insert(Seat {
+        id: 0,
+        player_id: player.identity,
+        game_id: game.id,
+        card_count: 0,
+        position: 0,
+    })?;
 
     Ok(())
 }
