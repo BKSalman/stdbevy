@@ -1,8 +1,9 @@
 //! Generic "one table row, one list child" UI syncing.
 //!
-//! Implement [`TableList`] for a generated row type and add [`TableListPlugin<Row>`];
-//! the children of the entity marked with `TableList::Root` then follow the rows of
-//! that table, with no per-table system to write.
+//! Implement [`TableList`] for a generated row type and add [`TableListPlugin<Row>`]
+//! (or [`ViewListPlugin<Row>`] for a view); the children of the entity marked with
+//! `TableList::Root` then follow the rows of that table, with no per-table system to
+//! write.
 
 use std::marker::PhantomData;
 
@@ -64,10 +65,39 @@ where
     }
 }
 
+/// Same as [`TableListPlugin`], for the sources registered with `add_view` or
+/// `add_table_without_pk`.
+///
+/// Those bind only insert and delete callbacks, so `InsertUpdateMessage<T>` is never
+/// registered and [`TableListPlugin`] would panic on its missing `Messages` resource.
+/// A row that changes arrives here as a delete followed by an insert, which rebuilds
+/// the list just the same.
+pub struct ViewListPlugin<T: TableList>(PhantomData<fn() -> T>);
+
+impl<T: TableList> Default for ViewListPlugin<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> Plugin for ViewListPlugin<T>
+where
+    T: TableList,
+    RowEvent<T>: Send + Sync,
+    for<'db> <T::Accessor as TableAccessor<RemoteTables>>::Handle<'db>: TableLike<Row = T>,
+{
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            PreUpdate,
+            sync_view_list::<T>.run_if(resource_exists::<StdbConn>),
+        );
+    }
+}
+
 /// Rebuilds the list when its rows changed, or when the container was just spawned
 /// (re-entering a state gives a fresh, empty container that no row message follows).
 fn sync_table_list<T>(
-    mut commands: Commands,
+    commands: Commands,
     conn: Res<StdbConn>,
     root: Single<Entity, With<T::Root>>,
     new_root: Query<(), Added<T::Root>>,
@@ -80,15 +110,41 @@ fn sync_table_list<T>(
 {
     // `+` rather than `||` so both readers are always drained
     let row_changed = inserts.read().count() + deletes.read().count() > 0;
-    if !row_changed && new_root.is_empty() {
-        return;
+    if row_changed || !new_root.is_empty() {
+        rebuild_list::<T>(commands, &conn, *root);
     }
+}
 
+/// [`sync_table_list`] for views and tables without a primary key: insert and delete only.
+fn sync_view_list<T>(
+    commands: Commands,
+    conn: Res<StdbConn>,
+    root: Single<Entity, With<T::Root>>,
+    new_root: Query<(), Added<T::Root>>,
+    mut inserts: ReadInsertMessage<T>,
+    mut deletes: ReadDeleteMessage<T>,
+) where
+    T: TableList,
+    RowEvent<T>: Send + Sync,
+    for<'db> <T::Accessor as TableAccessor<RemoteTables>>::Handle<'db>: TableLike<Row = T>,
+{
+    // `+` rather than `||` so both readers are always drained
+    let row_changed = inserts.read().count() + deletes.read().count() > 0;
+    if row_changed || !new_root.is_empty() {
+        rebuild_list::<T>(commands, &conn, *root);
+    }
+}
+
+fn rebuild_list<T>(mut commands: Commands, conn: &StdbConn, root: Entity)
+where
+    T: TableList,
+    for<'db> <T::Accessor as TableAccessor<RemoteTables>>::Handle<'db>: TableLike<Row = T>,
+{
     let mut rows: Vec<T> = T::Accessor::get(conn.db()).iter().collect();
     rows.sort_by(|a, b| a.order().cmp(&b.order()));
 
-    commands.entity(*root).despawn_children();
+    commands.entity(root).despawn_children();
     for row in rows {
-        commands.spawn_scene(row.row()).insert(ChildOf(*root));
+        commands.spawn_scene(row.row()).insert(ChildOf(root));
     }
 }

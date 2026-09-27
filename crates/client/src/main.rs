@@ -9,12 +9,13 @@ use bevy_stdb::prelude::*;
 use spacetimedb_sdk::Identity;
 
 use stdb::*;
-use table_list::{TableList, TableListPlugin};
+use table_list::{TableList, TableListPlugin, ViewListPlugin};
 
 use crate::module_bindings::{
-    Game, GameTableAccessor, Player, Seat, SeatTableAccessor, create_game, enter_game,
-    gameQueryTableAccess, leave_game, myhandQueryTableAccess, played_cardQueryTableAccess,
-    playerQueryTableAccess, seatQueryTableAccess,
+    Game, GameTableAccessor, MyhandTableAccessor, Player, PlayerHand, Seat, SeatTableAccessor,
+    create_game, enter_game, gameQueryTableAccess, leave_game, myhand_table,
+    myhandQueryTableAccess, played_cardQueryTableAccess, playerQueryTableAccess,
+    seatQueryTableAccess, start_game,
 };
 
 #[derive(Component, Debug, Default)]
@@ -40,6 +41,9 @@ pub struct GamesListRoot;
 
 #[derive(Component, Debug, Default, Clone)]
 pub struct PlayersListRoot;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct PlayerHandRoot;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
 enum AppState {
@@ -78,10 +82,12 @@ impl Plugin for AppPlugin {
 
         app.add_systems(OnEnter(AppState::MainMenu), spawn_main_menu_ui);
         app.add_systems(OnEnter(AppState::InLobby), spawn_in_lobby_ui);
+        app.add_systems(OnEnter(AppState::InGame), spawn_in_game_ui);
 
         app.add_plugins((
             TableListPlugin::<Game>::default(),
             TableListPlugin::<Seat>::default(),
+            ViewListPlugin::<PlayerHand>::default(),
         ));
 
         app.add_systems(
@@ -97,6 +103,12 @@ impl Plugin for AppPlugin {
                 exit_lobby_when_unseated,
             )
                 .run_if(resource_exists::<LocalPlayer>),
+        );
+
+        app.add_systems(
+            PreUpdate,
+            (enter_game_when_started,)
+                .run_if(resource_exists::<LocalPlayer>.and_eager(resource_exists::<CurrentGame>)),
         );
     }
 }
@@ -143,18 +155,35 @@ fn button(label: impl Into<String>) -> impl Scene {
 }
 
 fn spawn_in_lobby_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
+    let current_game = current_game.0;
     commands
         .spawn_scene(bsn! {
-            button("Leave game")
-            on(|_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
-                if let Err(err) = conn.reducers().leave_game() {
-                    error!("could not request leave_game: {err}");
-                }
-            })
+            Node {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+            }
+            Children [
+                (
+                    button("Start game")
+                    on(move |_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
+                        if let Err(err) = conn.reducers().start_game(current_game) {
+                            error!("could not request leave_game: {err}");
+                        }
+                    })
+                ),
+                (
+                    button("Leave game")
+                    on(|_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
+                        if let Err(err) = conn.reducers().leave_game() {
+                            error!("could not request leave_game: {err}");
+                        }
+                    })
+                )
+            ]
         })
         .insert(DespawnOnExit(AppState::InLobby));
     commands
-        .spawn_scene(players_list(current_game.0))
+        .spawn_scene(players_list(current_game))
         .insert(DespawnOnExit(AppState::InLobby));
 }
 
@@ -257,6 +286,134 @@ impl TableList for Game {
     }
 }
 
+fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
+    let game = current_game.0;
+    commands
+        .spawn_scene(bsn! {
+            Node {
+                left: px(5),
+                top: px(5),
+            }
+            Text::new(format!("current game: {}", game))
+        })
+        .insert(DespawnOnExit(AppState::InGame));
+
+    commands
+        .spawn_scene(bsn! {
+            PlayerHandRoot
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: px(0),
+                left: px(0),
+                right: px(0),
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                padding: px(10),
+                column_gap: px(10),
+            }
+        })
+        .insert(DespawnOnExit(AppState::InGame));
+}
+
+impl TableList for PlayerHand {
+    type Accessor = MyhandTableAccessor;
+    type Root = PlayerHandRoot;
+    type Order = u64;
+
+    fn order(&self) -> u64 {
+        self.seat_id
+    }
+
+    fn row(self) -> impl Scene {
+        let cards_scenes: Vec<_> = self
+            .cards
+            .iter()
+            .map(|c| {
+                let card_name = match c.suit {
+                    module_bindings::Suit::Hearts => match c.rank {
+                        module_bindings::Rank::Ace => String::from("AceHearts"),
+                        module_bindings::Rank::Two => String::from("TwoHearts"),
+                        module_bindings::Rank::Three => String::from("ThreeHearts"),
+                        module_bindings::Rank::Four => String::from("FourHearts"),
+                        module_bindings::Rank::Five => String::from("FiveHearts"),
+                        module_bindings::Rank::Six => String::from("SixHearts"),
+                        module_bindings::Rank::Seven => String::from("SevenHearts"),
+                        module_bindings::Rank::Eight => String::from("EightHearts"),
+                        module_bindings::Rank::Nine => String::from("NineHearts"),
+                        module_bindings::Rank::Ten => String::from("TenHearts"),
+                        module_bindings::Rank::Jack => String::from("JackHearts"),
+                        module_bindings::Rank::Queen => String::from("QueenHearts"),
+                        module_bindings::Rank::King => String::from("KingHearts"),
+                    },
+                    module_bindings::Suit::Diamonds => match c.rank {
+                        module_bindings::Rank::Ace => String::from("AceDiamonds"),
+                        module_bindings::Rank::Two => String::from("TwoDiamonds"),
+                        module_bindings::Rank::Three => String::from("ThreeDiamonds"),
+                        module_bindings::Rank::Four => String::from("FourDiamonds"),
+                        module_bindings::Rank::Five => String::from("FiveDiamonds"),
+                        module_bindings::Rank::Six => String::from("SixDiamonds"),
+                        module_bindings::Rank::Seven => String::from("SevenDiamonds"),
+                        module_bindings::Rank::Eight => String::from("EightDiamonds"),
+                        module_bindings::Rank::Nine => String::from("NineDiamonds"),
+                        module_bindings::Rank::Ten => String::from("TenDiamonds"),
+                        module_bindings::Rank::Jack => String::from("JackDiamonds"),
+                        module_bindings::Rank::Queen => String::from("QueenDiamonds"),
+                        module_bindings::Rank::King => String::from("KingDiamonds"),
+                    },
+                    module_bindings::Suit::Clubs => match c.rank {
+                        module_bindings::Rank::Ace => String::from("AceClubs"),
+                        module_bindings::Rank::Two => String::from("TwoClubs"),
+                        module_bindings::Rank::Three => String::from("ThreeClubs"),
+                        module_bindings::Rank::Four => String::from("FourClubs"),
+                        module_bindings::Rank::Five => String::from("FiveClubs"),
+                        module_bindings::Rank::Six => String::from("SixClubs"),
+                        module_bindings::Rank::Seven => String::from("SevenClubs"),
+                        module_bindings::Rank::Eight => String::from("EightClubs"),
+                        module_bindings::Rank::Nine => String::from("NineClubs"),
+                        module_bindings::Rank::Ten => String::from("TenClubs"),
+                        module_bindings::Rank::Jack => String::from("JackClubs"),
+                        module_bindings::Rank::Queen => String::from("QueenClubs"),
+                        module_bindings::Rank::King => String::from("KingClubs"),
+                    },
+                    module_bindings::Suit::Spades => match c.rank {
+                        module_bindings::Rank::Ace => String::from("AceSpades"),
+                        module_bindings::Rank::Two => String::from("TwoSpades"),
+                        module_bindings::Rank::Three => String::from("ThreeSpades"),
+                        module_bindings::Rank::Four => String::from("FourSpades"),
+                        module_bindings::Rank::Five => String::from("FiveSpades"),
+                        module_bindings::Rank::Six => String::from("SixSpades"),
+                        module_bindings::Rank::Seven => String::from("SevenSpades"),
+                        module_bindings::Rank::Eight => String::from("EightSpades"),
+                        module_bindings::Rank::Nine => String::from("NineSpades"),
+                        module_bindings::Rank::Ten => String::from("TenSpades"),
+                        module_bindings::Rank::Jack => String::from("JackSpades"),
+                        module_bindings::Rank::Queen => String::from("QueenSpades"),
+                        module_bindings::Rank::King => String::from("KingSpades"),
+                    },
+                };
+
+                bsn! {
+                    Text::new(card_name)
+                }
+            })
+            .collect();
+
+        bsn! {
+            Node {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::Center,
+                column_gap: px(10),
+                row_gap: px(10),
+            }
+            Children [
+                { cards_scenes }
+            ]
+        }
+    }
+}
+
 fn spawn_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
@@ -301,6 +458,9 @@ fn enter_lobby_when_seated(
         subs.subscribe_query(SubKey::PlayerHand, move |q| {
             q.from.myhand().r#where(|myhand| myhand.game_id.eq(game_id))
         });
+        subs.subscribe_query(SubKey::Game, |q| {
+            q.from.game().r#where(|g| g.id.eq(game_id))
+        });
 
         commands.insert_resource(CurrentGame(game_id));
         commands.set_state(AppState::InLobby);
@@ -321,9 +481,40 @@ fn exit_lobby_when_unseated(
         subs.unsubscribe(&SubKey::Seat).ok();
         subs.unsubscribe(&SubKey::PlayedCard).ok();
         subs.unsubscribe(&SubKey::PlayerHand).ok();
+        subs.subscribe_query(SubKey::Game, |q| q.from.game());
 
         commands.remove_resource::<CurrentGame>();
         commands.set_state(AppState::MainMenu);
+    }
+}
+
+fn enter_game_when_started(
+    mut commands: Commands,
+    current_game: Res<CurrentGame>,
+    mut subs: ResMut<StdbSubs>,
+    mut seats: ReadUpdateMessage<Game>,
+) {
+    for msg in seats.read() {
+        if msg.new.id != current_game.0 {
+            continue;
+        }
+
+        let game_id = msg.new.id;
+        subs.subscribe_query(SubKey::Seat, move |q| {
+            q.from.seat().r#where(|s| s.game_id.eq(game_id))
+        });
+        subs.subscribe_query(SubKey::PlayedCard, move |q| {
+            q.from.played_card().r#where(|pc| pc.game_id.eq(game_id))
+        });
+        // XXX: is this needed?
+        subs.subscribe_query(SubKey::PlayerHand, move |q| {
+            q.from.myhand().r#where(|myhand| myhand.game_id.eq(game_id))
+        });
+        subs.subscribe_query(SubKey::Game, |q| {
+            q.from.game().r#where(|g| g.id.eq(game_id))
+        });
+
+        commands.set_state(AppState::InGame);
     }
 }
 

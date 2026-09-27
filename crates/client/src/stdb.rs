@@ -10,7 +10,6 @@ pub enum SubKey {
     MySeat,
     Seat,
     Game,
-    Deck,
     PlayerHand,
     PlayedCard,
 }
