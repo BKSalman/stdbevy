@@ -14,7 +14,7 @@ use table_list::{TableList, TableListPlugin, ViewListPlugin};
 use crate::module_bindings::{
     Game, GameTableAccessor, MyhandTableAccessor, Player, PlayerHand, Seat, SeatTableAccessor,
     create_game, enter_game, gameQueryTableAccess, leave_game, myhand_table,
-    myhandQueryTableAccess, played_cardQueryTableAccess, playerQueryTableAccess,
+    myhandQueryTableAccess, play_card, played_cardQueryTableAccess, playerQueryTableAccess,
     seatQueryTableAccess, start_game,
 };
 
@@ -44,6 +44,9 @@ pub struct PlayersListRoot;
 
 #[derive(Component, Debug, Default, Clone)]
 pub struct PlayerHandRoot;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct CurrentTurnRoot;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
 enum AppState {
@@ -107,7 +110,12 @@ impl Plugin for AppPlugin {
 
         app.add_systems(
             PreUpdate,
-            (enter_game_when_started,)
+            (update_turn_text).run_if(in_state(AppState::InGame)),
+        );
+
+        app.add_systems(
+            PreUpdate,
+            (handle_game_state,)
                 .run_if(resource_exists::<LocalPlayer>.and_eager(resource_exists::<CurrentGame>)),
         );
     }
@@ -291,10 +299,22 @@ fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
     commands
         .spawn_scene(bsn! {
             Node {
+                position_type: PositionType::Absolute,
                 left: px(5),
                 top: px(5),
             }
             Text::new(format!("current game: {}", game))
+        })
+        .insert(DespawnOnExit(AppState::InGame));
+    commands
+        .spawn_scene(bsn! {
+            CurrentTurnRoot
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(5),
+                top: px(50),
+            }
+            Text::new(format!("current turn: {}", 0))
         })
         .insert(DespawnOnExit(AppState::InGame));
 
@@ -329,7 +349,8 @@ impl TableList for PlayerHand {
         let cards_scenes: Vec<_> = self
             .cards
             .iter()
-            .map(|c| {
+            .enumerate()
+            .map(|(i, c)| {
                 let card_name = match c.suit {
                     module_bindings::Suit::Hearts => match c.rank {
                         module_bindings::Rank::Ace => String::from("AceHearts"),
@@ -394,7 +415,12 @@ impl TableList for PlayerHand {
                 };
 
                 bsn! {
-                    Text::new(card_name)
+                    button(card_name)
+                    on(move |_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
+                        if let Err(err) = conn.reducers().play_card(i as u32) {
+                            error!("could not request play_card: {err}");
+                        }
+                    })
                 }
             })
             .collect();
@@ -488,33 +514,77 @@ fn exit_lobby_when_unseated(
     }
 }
 
-fn enter_game_when_started(
+fn handle_game_state(
     mut commands: Commands,
-    current_game: Res<CurrentGame>,
+    mut current_game: ResMut<CurrentGame>,
     mut subs: ResMut<StdbSubs>,
-    mut seats: ReadUpdateMessage<Game>,
+    mut games: ReadUpdateMessage<Game>,
 ) {
-    for msg in seats.read() {
+    for msg in games.read() {
         if msg.new.id != current_game.0 {
             continue;
         }
 
-        let game_id = msg.new.id;
-        subs.subscribe_query(SubKey::Seat, move |q| {
-            q.from.seat().r#where(|s| s.game_id.eq(game_id))
-        });
-        subs.subscribe_query(SubKey::PlayedCard, move |q| {
-            q.from.played_card().r#where(|pc| pc.game_id.eq(game_id))
-        });
-        // XXX: is this needed?
-        subs.subscribe_query(SubKey::PlayerHand, move |q| {
-            q.from.myhand().r#where(|myhand| myhand.game_id.eq(game_id))
-        });
-        subs.subscribe_query(SubKey::Game, |q| {
-            q.from.game().r#where(|g| g.id.eq(game_id))
-        });
+        let new_game_state = (msg.new.state != msg.old.state).then_some(msg.new.state);
 
-        commands.set_state(AppState::InGame);
+        if let Some(new_game_state) = new_game_state {
+            match new_game_state {
+                module_bindings::GameState::Lobby => {
+                    let game_id = msg.new.id;
+                    subs.subscribe_query(SubKey::Seat, move |q| {
+                        q.from.seat().r#where(|s| s.game_id.eq(game_id))
+                    });
+                    subs.subscribe_query(SubKey::PlayedCard, move |q| {
+                        q.from.played_card().r#where(|pc| pc.game_id.eq(game_id))
+                    });
+                    // XXX: is this needed?
+                    subs.subscribe_query(SubKey::PlayerHand, move |q| {
+                        q.from.myhand().r#where(|myhand| myhand.game_id.eq(game_id))
+                    });
+                    subs.subscribe_query(SubKey::Game, |q| {
+                        q.from.game().r#where(|g| g.id.eq(game_id))
+                    });
+
+                    commands.set_state(AppState::InLobby);
+                }
+                module_bindings::GameState::Playing => {
+                    let game_id = msg.new.id;
+                    subs.subscribe_query(SubKey::Seat, move |q| {
+                        q.from.seat().r#where(|s| s.game_id.eq(game_id))
+                    });
+                    subs.subscribe_query(SubKey::PlayedCard, move |q| {
+                        q.from.played_card().r#where(|pc| pc.game_id.eq(game_id))
+                    });
+                    // XXX: is this needed?
+                    subs.subscribe_query(SubKey::PlayerHand, move |q| {
+                        q.from.myhand().r#where(|myhand| myhand.game_id.eq(game_id))
+                    });
+                    subs.subscribe_query(SubKey::Game, |q| {
+                        q.from.game().r#where(|g| g.id.eq(game_id))
+                    });
+
+                    commands.set_state(AppState::InGame);
+                }
+                module_bindings::GameState::Ended => {
+                    subs.unsubscribe(&SubKey::Seat).ok();
+                    subs.unsubscribe(&SubKey::PlayedCard).ok();
+                    // XXX: is this needed?
+                    subs.unsubscribe(&SubKey::PlayerHand).ok();
+                    subs.unsubscribe(&SubKey::Game).ok();
+
+                    commands.set_state(AppState::MainMenu);
+                }
+            }
+        }
+    }
+}
+
+fn update_turn_text(
+    mut games: ReadUpdateMessage<Game>,
+    mut text: Single<&mut Text, With<CurrentTurnRoot>>,
+) {
+    for msg in games.read() {
+        text.0 = format!("current turn: {}", msg.new.current_seat);
     }
 }
 
