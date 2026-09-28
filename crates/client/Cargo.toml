@@ -17,7 +17,8 @@ tracing = { version = "0.1", features = [
     "release_max_level_warn",
 ] }
 bevy-inspector-egui = "0.37.0"
+log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
 
 [features]
 default = ["debug"]
-debug = ["bevy/debug"]
+debug = ["bevy/debug", "bevy/dynamic_linking"]

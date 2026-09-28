@@ -55,13 +55,16 @@
     in
     with pkgs;
     {
-      devShells.${system}.default = mkShell {
+      devShells.${system}.default = mkShell.override {
+        stdenv = pkgs.useWildLinker pkgs.stdenv;
+      } {
 
         packages = [
-          (rust-bin.stable.latest.default.override {
+          (rust-bin.nightly.latest.default.override {
             extensions = [
               "rust-src"
               "rust-analyzer"
+              "rustc-codegen-cranelift-preview"
             ];
             targets = [ "wasm32-unknown-unknown" ];
           })

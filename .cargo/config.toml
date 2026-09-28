@@ -1,0 +1,15 @@
+[unstable]
+codegen-backend = true
+
+# Cranelift for the app crate only: it cannot target wasm32, so the
+# server module and all dependencies stay on LLVM.
+[profile.dev]
+codegen-backend = "llvm"
+
+[profile.dev.package.client]
+codegen-backend = "cranelift"
+
+[target.x86_64-unknown-linux-gnu]
+# rustc defaults to its bundled rust-lld on this target; turn that off so the
+# `cc` driver's own linker (wild, wired up by the devshell) is used instead.
+rustflags = ["-Clinker-features=-lld", "-Zshare-generics=y"]
