@@ -12,6 +12,7 @@ pub enum SubKey {
     Game,
     PlayerHand,
     PlayedCard,
+    PlacedBid,
 }
 
 // The SpacetimeDB connection resource
@@ -43,6 +44,7 @@ impl Plugin for MyStdbPlugin {
                 .add_table::<SeatTableAccessor>()
                 .add_table::<GameTableAccessor>()
                 .add_table::<PlayedCardTableAccessor>()
+                .add_table::<PlacedBidTableAccessor>()
                 .add_view::<MyhandTableAccessor>()
                 // Typical case is using a background native driver, but there are others available for web or frame-driven
                 .with_background_driver(DbConnection::run_threaded),

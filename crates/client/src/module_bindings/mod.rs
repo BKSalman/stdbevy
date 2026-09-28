@@ -9,12 +9,16 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub mod card_type;
 pub mod create_game_reducer;
 pub mod deck_type;
+pub mod dev_start_solo_reducer;
 pub mod enter_game_reducer;
 pub mod game_state_type;
 pub mod game_table;
 pub mod game_type;
 pub mod leave_game_reducer;
 pub mod myhand_table;
+pub mod place_bid_reducer;
+pub mod placed_bid_table;
+pub mod placed_bid_type;
 pub mod play_card_reducer;
 pub mod played_card_table;
 pub mod played_card_type;
@@ -26,16 +30,22 @@ pub mod seat_table;
 pub mod seat_type;
 pub mod start_game_reducer;
 pub mod suit_type;
+pub mod withdraw_from_bidding_reducer;
+pub mod withdraw_from_game_reducer;
 
 pub use card_type::Card;
 pub use create_game_reducer::create_game;
 pub use deck_type::Deck;
+pub use dev_start_solo_reducer::dev_start_solo;
 pub use enter_game_reducer::enter_game;
 pub use game_state_type::GameState;
 pub use game_table::*;
 pub use game_type::Game;
 pub use leave_game_reducer::leave_game;
 pub use myhand_table::*;
+pub use place_bid_reducer::place_bid;
+pub use placed_bid_table::*;
+pub use placed_bid_type::PlacedBid;
 pub use play_card_reducer::play_card;
 pub use played_card_table::*;
 pub use played_card_type::PlayedCard;
@@ -47,6 +57,8 @@ pub use seat_table::*;
 pub use seat_type::Seat;
 pub use start_game_reducer::start_game;
 pub use suit_type::Suit;
+pub use withdraw_from_bidding_reducer::withdraw_from_bidding;
+pub use withdraw_from_game_reducer::withdraw_from_game;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -57,10 +69,14 @@ pub use suit_type::Suit;
 
 pub enum Reducer {
     CreateGame,
+    DevStartSolo,
     EnterGame { game_id: u64 },
     LeaveGame,
+    PlaceBid { bidding_amount: u64 },
     PlayCard { idx: u32 },
     StartGame { game_id: u64 },
+    WithdrawFromBidding,
+    WithdrawFromGame,
 }
 
 impl __sdk::InModule for Reducer {
@@ -71,10 +87,14 @@ impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
             Reducer::CreateGame => "create_game",
+            Reducer::DevStartSolo => "dev_start_solo",
             Reducer::EnterGame { .. } => "enter_game",
             Reducer::LeaveGame => "leave_game",
+            Reducer::PlaceBid { .. } => "place_bid",
             Reducer::PlayCard { .. } => "play_card",
             Reducer::StartGame { .. } => "start_game",
+            Reducer::WithdrawFromBidding => "withdraw_from_bidding",
+            Reducer::WithdrawFromGame => "withdraw_from_game",
             _ => unreachable!(),
         }
     }
@@ -82,12 +102,20 @@ impl __sdk::Reducer for Reducer {
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
             Reducer::CreateGame => __sats::bsatn::to_vec(&create_game_reducer::CreateGameArgs {}),
+            Reducer::DevStartSolo => {
+                __sats::bsatn::to_vec(&dev_start_solo_reducer::DevStartSoloArgs {})
+            }
             Reducer::EnterGame { game_id } => {
                 __sats::bsatn::to_vec(&enter_game_reducer::EnterGameArgs {
                     game_id: game_id.clone(),
                 })
             }
             Reducer::LeaveGame => __sats::bsatn::to_vec(&leave_game_reducer::LeaveGameArgs {}),
+            Reducer::PlaceBid { bidding_amount } => {
+                __sats::bsatn::to_vec(&place_bid_reducer::PlaceBidArgs {
+                    bidding_amount: bidding_amount.clone(),
+                })
+            }
             Reducer::PlayCard { idx } => {
                 __sats::bsatn::to_vec(&play_card_reducer::PlayCardArgs { idx: idx.clone() })
             }
@@ -95,6 +123,12 @@ impl __sdk::Reducer for Reducer {
                 __sats::bsatn::to_vec(&start_game_reducer::StartGameArgs {
                     game_id: game_id.clone(),
                 })
+            }
+            Reducer::WithdrawFromBidding => {
+                __sats::bsatn::to_vec(&withdraw_from_bidding_reducer::WithdrawFromBiddingArgs {})
+            }
+            Reducer::WithdrawFromGame => {
+                __sats::bsatn::to_vec(&withdraw_from_game_reducer::WithdrawFromGameArgs {})
             }
             _ => unreachable!(),
         }
@@ -107,6 +141,7 @@ impl __sdk::Reducer for Reducer {
 pub struct DbUpdate {
     game: __sdk::TableUpdate<Game>,
     myhand: __sdk::TableUpdate<PlayerHand>,
+    placed_bid: __sdk::TableUpdate<PlacedBid>,
     played_card: __sdk::TableUpdate<PlayedCard>,
     player: __sdk::TableUpdate<Player>,
     seat: __sdk::TableUpdate<Seat>,
@@ -124,6 +159,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "myhand" => db_update
                     .myhand
                     .append(myhand_table::parse_table_update(table_update)?),
+                "placed_bid" => db_update
+                    .placed_bid
+                    .append(placed_bid_table::parse_table_update(table_update)?),
                 "played_card" => db_update
                     .played_card
                     .append(played_card_table::parse_table_update(table_update)?),
@@ -162,6 +200,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.game = cache
             .apply_diff_to_table::<Game>("game", &self.game)
             .with_updates_by_pk(|row| &row.id);
+        diff.placed_bid = cache
+            .apply_diff_to_table::<PlacedBid>("placed_bid", &self.placed_bid)
+            .with_updates_by_pk(|row| &row.seat_id);
         diff.played_card = cache
             .apply_diff_to_table::<PlayedCard>("played_card", &self.played_card)
             .with_updates_by_pk(|row| &row.id);
@@ -184,6 +225,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "myhand" => db_update
                     .myhand
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "placed_bid" => db_update
+                    .placed_bid
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "played_card" => db_update
                     .played_card
@@ -213,6 +257,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "myhand" => db_update
                     .myhand
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "placed_bid" => db_update
+                    .placed_bid
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "played_card" => db_update
                     .played_card
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -239,6 +286,7 @@ impl __sdk::DbUpdate for DbUpdate {
 pub struct AppliedDiff<'r> {
     game: __sdk::TableAppliedDiff<'r, Game>,
     myhand: __sdk::TableAppliedDiff<'r, PlayerHand>,
+    placed_bid: __sdk::TableAppliedDiff<'r, PlacedBid>,
     played_card: __sdk::TableAppliedDiff<'r, PlayedCard>,
     player: __sdk::TableAppliedDiff<'r, Player>,
     seat: __sdk::TableAppliedDiff<'r, Seat>,
@@ -257,6 +305,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
     ) {
         callbacks.invoke_table_row_callbacks::<Game>("game", &self.game, event);
         callbacks.invoke_table_row_callbacks::<PlayerHand>("myhand", &self.myhand, event);
+        callbacks.invoke_table_row_callbacks::<PlacedBid>("placed_bid", &self.placed_bid, event);
         callbacks.invoke_table_row_callbacks::<PlayedCard>("played_card", &self.played_card, event);
         callbacks.invoke_table_row_callbacks::<Player>("player", &self.player, event);
         callbacks.invoke_table_row_callbacks::<Seat>("seat", &self.seat, event);
@@ -922,10 +971,17 @@ impl __sdk::SpacetimeModule for RemoteModule {
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         game_table::register_table(client_cache);
         myhand_table::register_table(client_cache);
+        placed_bid_table::register_table(client_cache);
         played_card_table::register_table(client_cache);
         player_table::register_table(client_cache);
         seat_table::register_table(client_cache);
     }
-    const ALL_TABLE_NAMES: &'static [&'static str] =
-        &["game", "myhand", "played_card", "player", "seat"];
+    const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "game",
+        "myhand",
+        "placed_bid",
+        "played_card",
+        "player",
+        "seat",
+    ];
 }
