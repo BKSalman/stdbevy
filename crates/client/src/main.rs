@@ -12,7 +12,10 @@ use bevy::{
     prelude::*,
     text::{EditableText, EditableTextFilter, TextCursorStyle},
 };
+
+#[cfg(feature = "debug")]
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
+
 use bevy_stdb::prelude::*;
 use spacetimedb_sdk::{Identity, table::TableLike};
 
@@ -108,9 +111,11 @@ impl Plugin for AppPlugin {
                 .into(),
                 ..default()
             }),
-        )
-        .add_plugins(EguiPlugin::default())
-        .add_plugins(WorldInspectorPlugin::new());
+        );
+
+        #[cfg(feature = "debug")]
+        app.add_plugins(EguiPlugin::default())
+            .add_plugins(WorldInspectorPlugin::new());
 
         app.init_state::<AppState>();
 

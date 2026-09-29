@@ -66,11 +66,11 @@
               "rust-analyzer"
               "rustc-codegen-cranelift-preview"
             ];
-            targets = [ "wasm32-unknown-unknown" ];
+            targets = [ "wasm32-unknown-unknown" "x86_64-pc-windows-msvc" ];
           })
 
           cargo-watch
-          # binaryen
+          cargo-xwin
 
           spacetimedb
         ];

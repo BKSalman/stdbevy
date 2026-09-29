@@ -3,7 +3,7 @@
     "run": "cargo run -p client"
   },
   "server": "maincloud",
-  "database": "stdbevy-tu6vc",
+  "database": "stdbevy-1a3f6",
   "module-path": "./crates/server",
   "generate": [
     {

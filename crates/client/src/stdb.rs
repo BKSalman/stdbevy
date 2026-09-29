@@ -30,10 +30,21 @@ pub type StdbSubs = StdbSubscriptions<SubKey, RemoteModule>;
 pub struct MyStdbPlugin;
 impl Plugin for MyStdbPlugin {
     fn build(&self, app: &mut App) {
+        let mut plugin = StdbPlugin::<DbConnection, RemoteModule>::default();
+
+        #[cfg(debug_assertions)]
+        {
+            plugin = plugin.with_uri(String::from("http://localhost:3001"));
+        }
+
+        #[cfg(not(debug_assertions))]
+        {
+            plugin = plugin.with_uri("https://maincloud.spacetimedb.com");
+        }
+
         app.add_plugins(
-            StdbPlugin::<DbConnection, RemoteModule>::default()
-                .with_uri(String::from("http://localhost:3001"))
-                .with_database_name(String::from("stdbevy-tu6vc"))
+            plugin
+                .with_database_name(String::from("stdbevy-1a3f6"))
                 // Enables subscription management within bevy_stdb
                 .with_subscriptions::<SubKey>()
                 // Connects directly upon plugin build
