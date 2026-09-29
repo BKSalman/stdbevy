@@ -3,6 +3,8 @@ mod module_bindings;
 mod stdb;
 mod table_list;
 
+use std::any::Any;
+
 use bevy::{
     color::palettes::{css::DARK_GREY, tailwind::SLATE_300},
     input::keyboard::KeyboardInput,
@@ -12,36 +14,47 @@ use bevy::{
 };
 use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
 use bevy_stdb::prelude::*;
-use spacetimedb_sdk::Identity;
+use spacetimedb_sdk::{Identity, table::TableLike};
 
 use stdb::*;
 use table_list::{TableList, TableListPlugin, ViewListPlugin};
 
 use crate::module_bindings::{
-    Game, GameTableAccessor, MyhandTableAccessor, PlacedBid, Player, PlayerHand, Seat,
-    SeatTableAccessor, create_game, enter_game, gameQueryTableAccess, leave_game, myhand_table,
-    myhandQueryTableAccess, place_bid, placed_bidQueryTableAccess, play_card,
-    played_cardQueryTableAccess, playerQueryTableAccess, seatQueryTableAccess, start_game,
-    withdraw_from_game,
+    Game, GameTableAccess, GameTableAccessor, MyhandTableAccess, MyhandTableAccessor, PlacedBid,
+    Player, PlayerHand, Seat, SeatTableAccess, SeatTableAccessor, create_game, enter_game,
+    gameQueryTableAccess, leave_game, myhandQueryTableAccess, place_bid,
+    placed_bidQueryTableAccess, played_cardQueryTableAccess, playerQueryTableAccess,
+    seatQueryTableAccess, start_game, withdraw_from_game,
 };
 
-#[derive(Component, Debug, Default)]
+#[derive(Component, Debug, Default, Clone)]
 pub struct PlayerMarker(Identity);
 
-#[derive(Resource, Debug, Default)]
+#[cfg_attr(feature = "debug", derive(Reflect))]
+#[derive(Component, Debug, Default, Clone)]
 pub struct SeatId(u64);
+
+#[cfg_attr(feature = "debug", derive(Reflect))]
+#[derive(Component, Debug, Default, Clone)]
+pub struct PlayerPosition(u8);
 
 #[derive(Resource, Debug, Default, Clone)]
 pub struct LocalPlayer(Identity);
 
-#[derive(Component, Debug, Default)]
-pub struct NetTransform {
-    x: f32,
-    y: f32,
-}
+#[cfg_attr(feature = "debug", derive(Reflect))]
+#[derive(Resource, Debug, Default)]
+pub struct LocalSeat(u64);
 
+#[cfg_attr(feature = "debug", derive(Reflect))]
+#[derive(Resource, Debug, Default)]
+pub struct LocalPosition(u8);
+
+#[cfg_attr(feature = "debug", derive(Reflect))]
 #[derive(Resource, Debug, Default, Clone, Copy)]
-pub struct CurrentGame(u64);
+pub struct CurrentGame {
+    id: u64,
+    player_count: u8,
+}
 
 #[derive(Component, Debug, Default, Clone)]
 pub struct GamesListRoot;
@@ -62,7 +75,13 @@ pub struct BidTextInput;
 pub struct BiddingContainer;
 
 #[derive(Component, Debug, Default, Clone)]
-pub struct BidText;
+pub struct LocalBidText;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct OnlineBidText;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct CreditText;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
 enum AppState {
@@ -101,7 +120,7 @@ impl Plugin for AppPlugin {
 
         app.add_systems(OnEnter(AppState::MainMenu), spawn_main_menu_ui);
         app.add_systems(OnEnter(AppState::InLobby), spawn_in_lobby_ui);
-        app.add_systems(OnEnter(AppState::InGame), spawn_in_game_ui);
+        app.add_systems(OnEnter(AppState::InGame), (spawn_in_game_ui, spawn_players));
 
         app.add_plugins((
             TableListPlugin::<Game>::default(),
@@ -116,25 +135,28 @@ impl Plugin for AppPlugin {
 
         app.add_systems(
             PreUpdate,
-            (
-                spawn_player,
-                enter_lobby_when_seated,
-                exit_lobby_when_unseated,
-            )
+            (enter_lobby_when_seated, exit_lobby_when_unseated)
                 .run_if(resource_exists::<LocalPlayer>),
         );
 
         app.add_systems(
             PreUpdate,
-            (update_turn_text).run_if(in_state(AppState::InGame)),
+            (
+                update_turn_text,
+                update_credit_text,
+                handle_new_round,
+                handle_placed_bids,
+            )
+                .run_if(in_state(AppState::InGame)),
         );
 
         app.add_systems(
             PreUpdate,
-            (handle_game_state, handle_placed_bids).run_if(
+            (handle_game_state).run_if(
                 resource_exists::<LocalPlayer>
                     .and_eager(resource_exists::<CurrentGame>)
-                    .and_eager(resource_exists::<SeatId>),
+                    .and_eager(resource_exists::<LocalSeat>)
+                    .and_eager(resource_exists::<LocalPosition>),
             ),
         );
 
@@ -191,7 +213,7 @@ fn button(label: impl Into<String>) -> impl Scene {
 }
 
 fn spawn_in_lobby_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
-    let current_game = current_game.0;
+    let current_game = current_game.id;
     commands
         .spawn_scene(bsn! {
             Node {
@@ -324,8 +346,20 @@ impl TableList for Game {
     }
 }
 
-fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
-    let game = current_game.0;
+fn spawn_in_game_ui(
+    mut commands: Commands,
+    conn: Res<StdbConn>,
+    current_game: Res<CurrentGame>,
+    local_seat: Res<LocalSeat>,
+) {
+    let game = current_game.id;
+
+    let hands = conn.db().myhand();
+    let credit = hands
+        .iter()
+        .find(|hand| hand.seat_id == local_seat.0)
+        .map(|hand| format!("credit: {}", hand.total_credit))
+        .unwrap_or_default();
     commands
         .spawn_scene(bsn! {
             Node {
@@ -369,7 +403,7 @@ fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
                 left: px(0),
                 right: px(0),
                 display: Display::Flex,
-                flex_direction: FlexDirection::Row,
+                flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 padding: px(10),
@@ -377,8 +411,17 @@ fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
             }
             Children [
                 (
-                    BidText
-                    Text::new("Your bidding:")
+                    CreditText
+                    Text::new(credit)
+                    TextFont {
+                        font_size: FontSize::Px(38.),
+                    }
+                ),
+                (
+                    LocalBidText
+                    TextFont {
+                        font_size: FontSize::Px(38.),
+                    }
                 ),
                 (
                     Node {
@@ -400,6 +443,7 @@ fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
                                 visible_width: Option::Some(10.),
                                 visible_lines: Option::Some(1.0),
                                 allow_newlines: false,
+                                max_characters: Option::Some(9),
                             }
                             TextFont {
                                 font_size: FontSize::Px(38.),
@@ -411,19 +455,30 @@ fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
                         ),
                         (
                             button("bid")
-                            on(move |mut event: On<Pointer<Press>>, inputs: Query<&EditableText, With<BidTextInput>>, conn: Res<StdbConn>| {
-                                for input in inputs {
+                            on(move |mut event: On<Pointer<Press>>, mut inputs: Query<&mut EditableText, With<BidTextInput>>, conn: Res<StdbConn>| {
+                                for mut input in &mut inputs {
                                     if let Ok(bid_ammount) = input.editor.text().to_string().parse::<u64>() {
-                                        if let Err(err) = conn.reducers().place_bid(bid_ammount) {
-                                            error!("could not request leave_game: {err}");
+                                        match conn.reducers().place_bid(bid_ammount) {
+                                            Ok(()) => input.clear(),
+                                            Err(err) => error!("could not request place_bid: {err}"),
                                         }
                                     }
                                 }
                                 event.propagate(false);
                             })
                         ),
-                        (PlayerHandRoot)
                     ]
+                ),
+                (
+                    PlayerHandRoot
+                    Node {
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        padding: px(10),
+                        column_gap: px(10),
+                    }
                 )
             ]
         })
@@ -443,72 +498,14 @@ impl TableList for PlayerHand {
         let cards_scenes: Vec<_> = self
             .cards
             .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                let card_name = match c.suit {
-                    module_bindings::Suit::Hearts => match c.rank {
-                        module_bindings::Rank::Ace => String::from("AceHearts"),
-                        module_bindings::Rank::Two => String::from("TwoHearts"),
-                        module_bindings::Rank::Three => String::from("ThreeHearts"),
-                        module_bindings::Rank::Four => String::from("FourHearts"),
-                        module_bindings::Rank::Five => String::from("FiveHearts"),
-                        module_bindings::Rank::Six => String::from("SixHearts"),
-                        module_bindings::Rank::Seven => String::from("SevenHearts"),
-                        module_bindings::Rank::Eight => String::from("EightHearts"),
-                        module_bindings::Rank::Nine => String::from("NineHearts"),
-                        module_bindings::Rank::Ten => String::from("TenHearts"),
-                        module_bindings::Rank::Jack => String::from("JackHearts"),
-                        module_bindings::Rank::Queen => String::from("QueenHearts"),
-                        module_bindings::Rank::King => String::from("KingHearts"),
-                    },
-                    module_bindings::Suit::Diamonds => match c.rank {
-                        module_bindings::Rank::Ace => String::from("AceDiamonds"),
-                        module_bindings::Rank::Two => String::from("TwoDiamonds"),
-                        module_bindings::Rank::Three => String::from("ThreeDiamonds"),
-                        module_bindings::Rank::Four => String::from("FourDiamonds"),
-                        module_bindings::Rank::Five => String::from("FiveDiamonds"),
-                        module_bindings::Rank::Six => String::from("SixDiamonds"),
-                        module_bindings::Rank::Seven => String::from("SevenDiamonds"),
-                        module_bindings::Rank::Eight => String::from("EightDiamonds"),
-                        module_bindings::Rank::Nine => String::from("NineDiamonds"),
-                        module_bindings::Rank::Ten => String::from("TenDiamonds"),
-                        module_bindings::Rank::Jack => String::from("JackDiamonds"),
-                        module_bindings::Rank::Queen => String::from("QueenDiamonds"),
-                        module_bindings::Rank::King => String::from("KingDiamonds"),
-                    },
-                    module_bindings::Suit::Clubs => match c.rank {
-                        module_bindings::Rank::Ace => String::from("AceClubs"),
-                        module_bindings::Rank::Two => String::from("TwoClubs"),
-                        module_bindings::Rank::Three => String::from("ThreeClubs"),
-                        module_bindings::Rank::Four => String::from("FourClubs"),
-                        module_bindings::Rank::Five => String::from("FiveClubs"),
-                        module_bindings::Rank::Six => String::from("SixClubs"),
-                        module_bindings::Rank::Seven => String::from("SevenClubs"),
-                        module_bindings::Rank::Eight => String::from("EightClubs"),
-                        module_bindings::Rank::Nine => String::from("NineClubs"),
-                        module_bindings::Rank::Ten => String::from("TenClubs"),
-                        module_bindings::Rank::Jack => String::from("JackClubs"),
-                        module_bindings::Rank::Queen => String::from("QueenClubs"),
-                        module_bindings::Rank::King => String::from("KingClubs"),
-                    },
-                    module_bindings::Suit::Spades => match c.rank {
-                        module_bindings::Rank::Ace => String::from("AceSpades"),
-                        module_bindings::Rank::Two => String::from("TwoSpades"),
-                        module_bindings::Rank::Three => String::from("ThreeSpades"),
-                        module_bindings::Rank::Four => String::from("FourSpades"),
-                        module_bindings::Rank::Five => String::from("FiveSpades"),
-                        module_bindings::Rank::Six => String::from("SixSpades"),
-                        module_bindings::Rank::Seven => String::from("SevenSpades"),
-                        module_bindings::Rank::Eight => String::from("EightSpades"),
-                        module_bindings::Rank::Nine => String::from("NineSpades"),
-                        module_bindings::Rank::Ten => String::from("TenSpades"),
-                        module_bindings::Rank::Jack => String::from("JackSpades"),
-                        module_bindings::Rank::Queen => String::from("QueenSpades"),
-                        module_bindings::Rank::King => String::from("KingSpades"),
-                    },
-                };
+            .map(|c| {
+                let card_name = format!("{:?} {:?}", c.rank, c.suit);
 
                 bsn! {
+                    Node {
+                        border: px(2),
+                    }
+                    BorderColor::from(Color::BLACK)
                     Text::new(card_name)
                 }
             })
@@ -533,6 +530,14 @@ fn spawn_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
+fn main_menu_sub(subs: &mut StdbSubs, me: Identity) {
+    subs.subscribe_query(SubKey::Player, |q| q.from.player());
+    subs.subscribe_query(SubKey::Game, |q| q.from.game());
+    subs.subscribe_query(SubKey::MySeat, move |q| {
+        q.from.seat().r#where(|s| s.player_id.eq(me))
+    });
+}
+
 fn subscribe_on_connect(
     mut commands: Commands,
     mut connected_msgs: ReadStdbConnectedMessage,
@@ -541,13 +546,7 @@ fn subscribe_on_connect(
     for msg in connected_msgs.read() {
         info!("connected as {:?}", msg.identity);
         commands.insert_resource(LocalPlayer(msg.identity));
-        subs.subscribe_query(SubKey::Player, |q| q.from.player());
-        subs.subscribe_query(SubKey::Game, |q| q.from.game());
-
-        let me = msg.identity;
-        subs.subscribe_query(SubKey::MySeat, move |q| {
-            q.from.seat().r#where(|s| s.player_id.eq(me))
-        });
+        main_menu_sub(&mut subs, msg.identity);
     }
 }
 
@@ -562,9 +561,7 @@ fn subscribe_to_game(subs: &mut StdbSubs, game_id: u64) {
         q.from.placed_bid().r#where(|pb| pb.game_id.eq(game_id))
     });
     // XXX: is this needed?
-    subs.subscribe_query(SubKey::PlayerHand, move |q| {
-        q.from.myhand().r#where(|myhand| myhand.game_id.eq(game_id))
-    });
+    subs.subscribe_query(SubKey::PlayerHand, move |q| q.from.myhand());
     subs.subscribe_query(SubKey::Game, |q| {
         q.from.game().r#where(|g| g.id.eq(game_id))
     });
@@ -572,9 +569,10 @@ fn subscribe_to_game(subs: &mut StdbSubs, game_id: u64) {
 
 fn enter_lobby_when_seated(
     mut commands: Commands,
-    local: Res<LocalPlayer>,
     mut subs: ResMut<StdbSubs>,
+    conn: Res<StdbConn>,
     mut seats: ReadInsertMessage<Seat>,
+    local: Res<LocalPlayer>,
 ) {
     for msg in seats.read() {
         if msg.row.player_id != local.0 {
@@ -582,9 +580,19 @@ fn enter_lobby_when_seated(
         }
 
         subscribe_to_game(&mut subs, msg.row.game_id);
+        let game = conn
+            .db()
+            .game()
+            .id()
+            .find(&msg.row.game_id)
+            .expect("game should exist");
 
-        commands.insert_resource(CurrentGame(msg.row.game_id));
-        commands.insert_resource(SeatId(msg.row.id));
+        commands.insert_resource(CurrentGame {
+            id: msg.row.game_id,
+            player_count: game.player_count,
+        });
+        commands.insert_resource(LocalSeat(msg.row.id));
+        commands.insert_resource(LocalPosition(msg.row.position));
         commands.set_state(AppState::InLobby);
     }
 }
@@ -603,21 +611,43 @@ fn exit_lobby_when_unseated(
         subs.unsubscribe(&SubKey::Seat).ok();
         subs.unsubscribe(&SubKey::PlayedCard).ok();
         subs.unsubscribe(&SubKey::PlayerHand).ok();
-        subs.subscribe_query(SubKey::Game, |q| q.from.game());
+        main_menu_sub(&mut subs, local.0);
 
         commands.remove_resource::<CurrentGame>();
+        commands.remove_resource::<LocalSeat>();
         commands.set_state(AppState::MainMenu);
+    }
+}
+
+fn handle_new_round(
+    mut commands: Commands,
+    current_game: Res<CurrentGame>,
+    mut games: ReadUpdateMessage<Game>,
+    online_bids: Query<Entity, With<OnlineBidText>>,
+    local_bid: Single<Entity, With<LocalBidText>>,
+) {
+    for msg in games.read() {
+        if msg.new.id != current_game.id {
+            continue;
+        }
+
+        if msg.old.round != msg.new.round {
+            commands.entity(*local_bid).insert(Text::default());
+            for online_bid in online_bids {
+                commands.entity(online_bid).insert(Text::default());
+            }
+        }
     }
 }
 
 fn handle_game_state(
     mut commands: Commands,
-    current_game: Res<CurrentGame>,
+    mut current_game: ResMut<CurrentGame>,
     mut subs: ResMut<StdbSubs>,
     mut games: ReadInsertUpdateMessage<Game>,
 ) {
     for msg in games.read() {
-        if msg.new.id != current_game.0 {
+        if msg.new.id != current_game.id {
             continue;
         }
 
@@ -631,11 +661,13 @@ fn handle_game_state(
             match new_game_state {
                 module_bindings::GameState::Lobby => {
                     subscribe_to_game(&mut subs, msg.new.id);
+                    current_game.player_count = msg.new.player_count;
 
                     commands.set_state(AppState::InLobby);
                 }
                 module_bindings::GameState::Playing => {
                     subscribe_to_game(&mut subs, msg.new.id);
+                    current_game.player_count = msg.new.player_count;
 
                     commands.set_state(AppState::InGame);
                 }
@@ -656,17 +688,17 @@ fn handle_game_state(
 
 fn handle_placed_bids(
     mut commands: Commands,
-    current_game: Res<CurrentGame>,
-    seat_id: Res<SeatId>,
-    mut text: Single<&mut Text, With<BidText>>,
-    mut subs: ResMut<StdbSubs>,
     mut bids: ReadInsertUpdateMessage<PlacedBid>,
+    current_game: Res<CurrentGame>,
+    local_seat_id: Res<LocalSeat>,
+    bid_text: Single<Entity, With<LocalBidText>>,
+    online_bid_texts: Query<(&ChildOf, Entity), With<OnlineBidText>>,
+    online_bid_texts_parents: Query<(&PlayerPosition, &SeatId)>,
 ) {
     for msg in bids.read() {
-        if msg.new.game_id != current_game.0 {
+        if msg.new.game_id != current_game.id {
             continue;
         }
-
         let new_bid = msg
             .old
             .as_ref()
@@ -674,9 +706,25 @@ fn handle_placed_bids(
             .then_some(msg.new.bidding_amount);
 
         if let Some(new_bid) = new_bid {
-            if msg.new.seat_id == seat_id.0 {
-                text.0 = format!("Your bidding: {}", new_bid);
+            if msg.new.seat_id == local_seat_id.0 {
+                commands
+                    .entity(*bid_text)
+                    .insert(Text::new(format!("Your bidding: {}", new_bid)));
             } else {
+                let mut parents_with_text = online_bid_texts.iter().flat_map(|(child, e)| {
+                    Result::<_, bevy::ecs::query::QueryEntityError>::Ok((
+                        e,
+                        online_bid_texts_parents.get(child.parent())?,
+                    ))
+                });
+
+                if let Some((entity, (position, _))) =
+                    parents_with_text.find(|(_e, (_pos, seat))| seat.0 == msg.new.seat_id)
+                {
+                    commands
+                        .entity(entity)
+                        .insert(Text::new(format!("{}'s bidding: {}", position.0, new_bid)));
+                }
             }
         }
     }
@@ -691,15 +739,63 @@ fn update_turn_text(
     }
 }
 
-fn spawn_player(
+fn update_credit_text(
+    mut player_hand: ReadInsertMessage<PlayerHand>,
+    local_seat: Res<LocalSeat>,
     mut commands: Commands,
-    local: Res<LocalPlayer>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut insert_player_msgs: ReadInsertMessage<module_bindings::Seat>,
+    credit_text: Single<Entity, With<CreditText>>,
 ) {
-    for msg in insert_player_msgs.read() {
-        commands.spawn((PlayerMarker(msg.row.player_id), SeatId(msg.row.id)));
+    for msg in player_hand.read() {
+        if msg.row.seat_id != local_seat.0 {
+            continue;
+        }
+
+        commands
+            .entity(*credit_text)
+            .insert(Text::new(format!("credit: {}", msg.row.total_credit)));
+    }
+}
+
+fn spawn_players(
+    mut commands: Commands,
+    conn: Res<StdbConn>,
+    current_game: Res<CurrentGame>,
+    local_position: Res<LocalPosition>,
+) {
+    let seat_count = current_game.player_count.max(1);
+
+    let seats = conn.db().seat();
+
+    for seat in seats.iter().filter(|seat| seat.game_id == current_game.id) {
+        let player_position = seat.position;
+        let relative = (local_position.0 + seat_count - player_position % seat_count) % seat_count;
+        let (top, bottom, right, left) = match relative {
+            1 => (percent(50.), auto(), auto(), px(0)),
+            2 => (px(0), auto(), auto(), percent(50.)),
+            3 => (percent(50.), auto(), px(0), auto()),
+            _ => (auto(), auto(), auto(), auto()),
+        };
+
+        let player_id = seat.player_id;
+        let seat_id = seat.id;
+
+        commands
+            .spawn_scene(bsn! {
+                PlayerMarker(player_id)
+                SeatId(seat_id)
+                PlayerPosition(player_position)
+                Node {
+                    position_type: PositionType::Absolute,
+                    top,
+                    bottom,
+                    right,
+                    left,
+                }
+                Children [
+                    (OnlineBidText)
+                ]
+            })
+            .insert(DespawnOnExit(AppState::InGame));
     }
 }
 
@@ -748,6 +844,9 @@ fn dev_respawn_ui_hotkey(
     match state.get() {
         AppState::MainMenu => commands.run_system_cached(spawn_main_menu_ui),
         AppState::InLobby => commands.run_system_cached(spawn_in_lobby_ui),
-        AppState::InGame => commands.run_system_cached(spawn_in_game_ui),
+        AppState::InGame => {
+            commands.run_system_cached(spawn_in_game_ui);
+            commands.run_system_cached(spawn_players);
+        }
     }
 }

@@ -11,9 +11,10 @@ use super::game_state_type::GameState;
 pub struct Game {
     pub id: u64,
     pub state: GameState,
+    pub round_start: u8,
     pub current_seat: u8,
     pub round: u8,
-    pub starting_seat: u8,
+    pub plays_in_round: u8,
     pub player_count: u8,
 }
 
@@ -27,9 +28,10 @@ impl __sdk::InModule for Game {
 pub struct GameCols {
     pub id: __sdk::__query_builder::Col<Game, u64>,
     pub state: __sdk::__query_builder::Col<Game, GameState>,
+    pub round_start: __sdk::__query_builder::Col<Game, u8>,
     pub current_seat: __sdk::__query_builder::Col<Game, u8>,
     pub round: __sdk::__query_builder::Col<Game, u8>,
-    pub starting_seat: __sdk::__query_builder::Col<Game, u8>,
+    pub plays_in_round: __sdk::__query_builder::Col<Game, u8>,
     pub player_count: __sdk::__query_builder::Col<Game, u8>,
 }
 
@@ -39,9 +41,10 @@ impl __sdk::__query_builder::HasCols for Game {
         GameCols {
             id: __sdk::__query_builder::Col::new(table_name, "id"),
             state: __sdk::__query_builder::Col::new(table_name, "state"),
+            round_start: __sdk::__query_builder::Col::new(table_name, "round_start"),
             current_seat: __sdk::__query_builder::Col::new(table_name, "current_seat"),
             round: __sdk::__query_builder::Col::new(table_name, "round"),
-            starting_seat: __sdk::__query_builder::Col::new(table_name, "starting_seat"),
+            plays_in_round: __sdk::__query_builder::Col::new(table_name, "plays_in_round"),
             player_count: __sdk::__query_builder::Col::new(table_name, "player_count"),
         }
     }

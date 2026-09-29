@@ -13,6 +13,7 @@ pub struct PlayerHand {
     pub player_id: __sdk::Identity,
     pub game_id: u64,
     pub cards: Vec<Card>,
+    pub total_credit: u64,
 }
 
 impl __sdk::InModule for PlayerHand {
@@ -27,6 +28,7 @@ pub struct PlayerHandCols {
     pub player_id: __sdk::__query_builder::Col<PlayerHand, __sdk::Identity>,
     pub game_id: __sdk::__query_builder::Col<PlayerHand, u64>,
     pub cards: __sdk::__query_builder::Col<PlayerHand, Vec<Card>>,
+    pub total_credit: __sdk::__query_builder::Col<PlayerHand, u64>,
 }
 
 impl __sdk::__query_builder::HasCols for PlayerHand {
@@ -37,6 +39,7 @@ impl __sdk::__query_builder::HasCols for PlayerHand {
             player_id: __sdk::__query_builder::Col::new(table_name, "player_id"),
             game_id: __sdk::__query_builder::Col::new(table_name, "game_id"),
             cards: __sdk::__query_builder::Col::new(table_name, "cards"),
+            total_credit: __sdk::__query_builder::Col::new(table_name, "total_credit"),
         }
     }
 }

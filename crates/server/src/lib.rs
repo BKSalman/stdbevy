@@ -216,7 +216,7 @@ pub fn enter_game(ctx: &ReducerContext, game_id: u64) -> Result<(), String> {
         return Err(String::from("play not found"));
     };
 
-    let Some(game) = ctx.db.game().id().find(game_id) else {
+    let Some(mut game) = ctx.db.game().id().find(game_id) else {
         return Err(String::from("game not found"));
     };
 
@@ -231,6 +231,8 @@ pub fn enter_game(ctx: &ReducerContext, game_id: u64) -> Result<(), String> {
                     card_count: 0,
                     position: seats as u8,
                 })?;
+                game.player_count += 1;
+                ctx.db.game().id().update(game);
             } else {
                 return Err(String::from("game is full"));
             }
@@ -427,72 +429,40 @@ fn calculate_credit(cards: &[Card]) -> u64 {
         && sorted[2].rank as u64 + 1 == sorted[3].rank as u64;
 
     if let Some((r, _s)) = duplicates.iter().find(|(_r, s)| s.len() == 4) {
-        total_credit += *r as u64 * 10;
+        total_credit += (*r as u64 + 1) * 10;
     } else if is_series {
         for card in sorted {
-            total_credit += card.rank as u64 * 4;
+            total_credit += (card.rank as u64 + 1) * 4;
         }
     } else if let Some((r, _s)) = duplicates.iter().find(|(_r, s)| s.len() == 3) {
-        total_credit += *r as u64 * 3;
+        total_credit += (*r as u64 + 1) * 3;
     } else if duplicates.iter().find(|(_r, s)| s.len() == 2).is_some() {
         let mut iter = duplicates.iter().filter(|(_r, s)| s.len() == 2);
 
         match (iter.next(), iter.next()) {
             (None, Some((r, _))) | (Some((r, _)), None) => {
-                total_credit += *r as u64 * 2;
+                total_credit += (*r as u64 + 1) * 2;
             }
             (Some((r1, _)), Some((r2, _))) => {
-                total_credit += *r1 as u64 * 2;
-                total_credit += *r2 as u64 * 2;
+                total_credit += (*r1 as u64 + 1) * 2;
+                total_credit += (*r2 as u64 + 1) * 2;
             }
             (None, None) => {}
         }
     } else if let Some(max) = cards.iter().map(|c| c.rank as u64).max() {
-        total_credit += max;
+        total_credit += max + 1;
     }
 
     total_credit
 }
 
-fn next_seat(game: &mut Game) {
-    let next_seat = game.current_seat + 1;
-    if next_seat >= game.player_count {
-        game.round += 1;
-        game.current_seat = game.round;
-    } else {
-        game.current_seat = next_seat;
-    }
-}
-
-#[spacetimedb::reducer]
-pub fn place_bid(ctx: &ReducerContext, bidding_amount: u64) -> Result<(), String> {
-    let Some(seat) = ctx.db.seat().player_id().find(ctx.sender()) else {
-        return Err(String::from("player doesn't have a seat"));
-    };
-    let Some(mut game) = ctx.db.game().id().find(seat.game_id) else {
-        return Err(String::from("player is not in a game"));
-    };
-
-    if !matches!(game.state, GameState::Playing) {
-        return Err(String::from("game is not in progress"));
-    }
-
-    if game.current_seat != seat.position {
-        return Err(String::from("not your turn"));
-    }
-
-    if let Some(mut placed_bid) = ctx.db.placed_bid().seat_id().find(seat.id) {
-        placed_bid.bidding_amount = bidding_amount;
-        ctx.db.placed_bid().seat_id().update(placed_bid);
-    } else {
-        ctx.db.placed_bid().insert(PlacedBid {
-            seat_id: seat.id,
-            game_id: seat.game_id,
-            bidding_amount,
-        });
-    }
-
+fn next_seat(ctx: &ReducerContext, mut game: Game) {
     game.plays_in_round += 1;
+    log::debug!(
+        "plays:{}, players:{}",
+        game.plays_in_round,
+        game.player_count
+    );
 
     if game.plays_in_round == game.player_count {
         game.round += 1;
@@ -509,11 +479,15 @@ pub fn place_bid(ctx: &ReducerContext, bidding_amount: u64) -> Result<(), String
             ctx.db.placed_bid().seat_id().delete(bid.seat_id);
         }
 
-        // TODO: check if deck.cards.len() > CARDS_PER_PLAYER * seats
+        let seats: Vec<_> = ctx.db.seat().game_id().filter(game.id).collect();
+
+        if deck.cards.len() < CARDS_PER_PLAYER * seats.len() {
+            // TODO: end game or something
+        }
 
         deck.cards.shuffle(&mut ctx.rng());
 
-        for other_seat in ctx.db.seat().game_id().filter(game.id) {
+        for other_seat in seats {
             let hand = deck.cards.split_off(deck.cards.len() - CARDS_PER_PLAYER);
 
             let total_credit = calculate_credit(&hand);
@@ -531,16 +505,14 @@ pub fn place_bid(ctx: &ReducerContext, bidding_amount: u64) -> Result<(), String
     }
 
     ctx.db.game().id().update(game);
-
-    Ok(())
 }
 
 #[spacetimedb::reducer]
-pub fn withdraw_from_bidding(ctx: &ReducerContext) -> Result<(), String> {
+pub fn place_bid(ctx: &ReducerContext, bidding_amount: u64) -> Result<(), String> {
     let Some(seat) = ctx.db.seat().player_id().find(ctx.sender()) else {
         return Err(String::from("player doesn't have a seat"));
     };
-    let Some(mut game) = ctx.db.game().id().find(seat.game_id) else {
+    let Some(game) = ctx.db.game().id().find(seat.game_id) else {
         return Err(String::from("player is not in a game"));
     };
 
@@ -552,11 +524,35 @@ pub fn withdraw_from_bidding(ctx: &ReducerContext) -> Result<(), String> {
         return Err(String::from("not your turn"));
     }
 
-    ctx.db.placed_bid().seat_id().delete(seat.id);
+    ctx.db.placed_bid().insert(PlacedBid {
+        seat_id: seat.id,
+        game_id: seat.game_id,
+        bidding_amount,
+    });
 
-    next_seat(&mut game);
+    next_seat(ctx, game);
 
-    ctx.db.game().id().update(game);
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn withdraw_from_bidding(ctx: &ReducerContext) -> Result<(), String> {
+    let Some(seat) = ctx.db.seat().player_id().find(ctx.sender()) else {
+        return Err(String::from("player doesn't have a seat"));
+    };
+    let Some(game) = ctx.db.game().id().find(seat.game_id) else {
+        return Err(String::from("player is not in a game"));
+    };
+
+    if !matches!(game.state, GameState::Playing) {
+        return Err(String::from("game is not in progress"));
+    }
+
+    if game.current_seat != seat.position {
+        return Err(String::from("not your turn"));
+    }
+
+    next_seat(ctx, game);
 
     Ok(())
 }
