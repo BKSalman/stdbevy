@@ -7,7 +7,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub(super) struct PlaceBidArgs {
-    pub bidding_amount: u64,
+    pub bidding_amount: i32,
 }
 
 impl From<PlaceBidArgs> for super::Reducer {
@@ -33,7 +33,7 @@ pub trait place_bid {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`place_bid:place_bid_then`] to run a callback after the reducer completes.
-    fn place_bid(&self, bidding_amount: u64) -> __sdk::Result<()> {
+    fn place_bid(&self, bidding_amount: i32) -> __sdk::Result<()> {
         self.place_bid_then(bidding_amount, |_, _| {})
     }
 
@@ -45,26 +45,22 @@ pub trait place_bid {
     ///  and its status can be observed with the `callback`.
     fn place_bid_then(
         &self,
-        bidding_amount: u64,
+        bidding_amount: i32,
 
-        callback: impl FnOnce(
-            &super::ReducerEventContext,
-            Result<Result<(), String>, __sdk::InternalError>,
-        ) + Send
-        + 'static,
+        callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
+            + Send
+            + 'static,
     ) -> __sdk::Result<()>;
 }
 
 impl place_bid for super::RemoteReducers {
     fn place_bid_then(
         &self,
-        bidding_amount: u64,
+        bidding_amount: i32,
 
-        callback: impl FnOnce(
-            &super::ReducerEventContext,
-            Result<Result<(), String>, __sdk::InternalError>,
-        ) + Send
-        + 'static,
+        callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
+            + Send
+            + 'static,
     ) -> __sdk::Result<()> {
         self.imp
             .invoke_reducer_with_callback(PlaceBidArgs { bidding_amount }, callback)

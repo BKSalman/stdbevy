@@ -12,6 +12,7 @@ pub struct Seat {
     pub game_id: u64,
     pub position: u8,
     pub card_count: u32,
+    pub balance: i32,
 }
 
 impl __sdk::InModule for Seat {
@@ -27,6 +28,7 @@ pub struct SeatCols {
     pub game_id: __sdk::__query_builder::Col<Seat, u64>,
     pub position: __sdk::__query_builder::Col<Seat, u8>,
     pub card_count: __sdk::__query_builder::Col<Seat, u32>,
+    pub balance: __sdk::__query_builder::Col<Seat, i32>,
 }
 
 impl __sdk::__query_builder::HasCols for Seat {
@@ -38,6 +40,7 @@ impl __sdk::__query_builder::HasCols for Seat {
             game_id: __sdk::__query_builder::Col::new(table_name, "game_id"),
             position: __sdk::__query_builder::Col::new(table_name, "position"),
             card_count: __sdk::__query_builder::Col::new(table_name, "card_count"),
+            balance: __sdk::__query_builder::Col::new(table_name, "balance"),
         }
     }
 }

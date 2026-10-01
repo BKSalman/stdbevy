@@ -3,8 +3,6 @@ mod module_bindings;
 mod stdb;
 mod table_list;
 
-use std::any::Any;
-
 use bevy::{
     color::palettes::{css::DARK_GREY, tailwind::SLATE_300},
     input::keyboard::KeyboardInput,
@@ -14,7 +12,10 @@ use bevy::{
 };
 
 #[cfg(feature = "debug")]
-use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
+use bevy_inspector_egui::{
+    bevy_egui::EguiPlugin,
+    quick::{StateInspectorPlugin, WorldInspectorPlugin},
+};
 
 use bevy_stdb::prelude::*;
 use spacetimedb_sdk::{Identity, table::TableLike};
@@ -27,7 +28,7 @@ use crate::module_bindings::{
     Player, PlayerHand, Seat, SeatTableAccess, SeatTableAccessor, create_game, enter_game,
     gameQueryTableAccess, leave_game, myhandQueryTableAccess, place_bid,
     placed_bidQueryTableAccess, played_cardQueryTableAccess, playerQueryTableAccess,
-    seatQueryTableAccess, start_game, withdraw_from_game,
+    seatQueryTableAccess, start_game, withdraw_from_bidding, withdraw_from_game,
 };
 
 #[derive(Component, Debug, Default, Clone)]
@@ -86,12 +87,22 @@ pub struct OnlineBidText;
 #[derive(Component, Debug, Default, Clone)]
 pub struct CreditText;
 
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States, Reflect)]
 enum AppState {
     #[default]
     MainMenu,
     InLobby,
     InGame,
+}
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, SubStates, Reflect)]
+#[source(AppState = AppState::InGame)]
+enum RoundState {
+    #[default]
+    Dealing,
+    Bidding,
+    Negotiation,
+    Showdown,
 }
 
 fn main() -> AppExit {
@@ -115,9 +126,11 @@ impl Plugin for AppPlugin {
 
         #[cfg(feature = "debug")]
         app.add_plugins(EguiPlugin::default())
-            .add_plugins(WorldInspectorPlugin::new());
+            .add_plugins(WorldInspectorPlugin::new())
+            .add_plugins(StateInspectorPlugin::<AppState>::default())
+            .add_plugins(StateInspectorPlugin::<RoundState>::default());
 
-        app.init_state::<AppState>();
+        app.init_state::<AppState>().add_sub_state::<RoundState>();
 
         app.add_plugins(MyStdbPlugin);
 
@@ -125,7 +138,11 @@ impl Plugin for AppPlugin {
 
         app.add_systems(OnEnter(AppState::MainMenu), spawn_main_menu_ui);
         app.add_systems(OnEnter(AppState::InLobby), spawn_in_lobby_ui);
-        app.add_systems(OnEnter(AppState::InGame), (spawn_in_game_ui, spawn_players));
+        app.add_systems(OnEnter(AppState::InGame), spawn_in_game_ui);
+        app.add_systems(
+            OnEnter(RoundState::Bidding),
+            (spawn_bidding_ui, spawn_players_biddings),
+        );
 
         app.add_plugins((
             TableListPlugin::<Game>::default(),
@@ -351,20 +368,8 @@ impl TableList for Game {
     }
 }
 
-fn spawn_in_game_ui(
-    mut commands: Commands,
-    conn: Res<StdbConn>,
-    current_game: Res<CurrentGame>,
-    local_seat: Res<LocalSeat>,
-) {
+fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
     let game = current_game.id;
-
-    let hands = conn.db().myhand();
-    let credit = hands
-        .iter()
-        .find(|hand| hand.seat_id == local_seat.0)
-        .map(|hand| format!("credit: {}", hand.total_credit))
-        .unwrap_or_default();
     commands
         .spawn_scene(bsn! {
             Node {
@@ -384,21 +389,28 @@ fn spawn_in_game_ui(
                         }
                         event.propagate(false);
                     })
+                ),
+                (
+                    CurrentTurnRoot
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: px(5),
+                        top: px(50),
+                    }
+                    Text::new(format!("current turn: {}", 0))
                 )
             ]
         })
         .insert(DespawnOnExit(AppState::InGame));
-    commands
-        .spawn_scene(bsn! {
-            CurrentTurnRoot
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(5),
-                top: px(50),
-            }
-            Text::new(format!("current turn: {}", 0))
-        })
-        .insert(DespawnOnExit(AppState::InGame));
+}
+
+fn spawn_bidding_ui(mut commands: Commands, conn: Res<StdbConn>, local_seat: Res<LocalSeat>) {
+    let hands = conn.db().myhand();
+    let credit = hands
+        .iter()
+        .find(|hand| hand.seat_id == local_seat.0)
+        .map(|hand| format!("credit: {}", hand.total_credit))
+        .unwrap_or_default();
 
     commands
         .spawn_scene(bsn! {
@@ -462,12 +474,21 @@ fn spawn_in_game_ui(
                             button("bid")
                             on(move |mut event: On<Pointer<Press>>, mut inputs: Query<&mut EditableText, With<BidTextInput>>, conn: Res<StdbConn>| {
                                 for mut input in &mut inputs {
-                                    if let Ok(bid_ammount) = input.editor.text().to_string().parse::<u64>() {
-                                        match conn.reducers().place_bid(bid_ammount) {
+                                    if let Ok(bid_amount) = input.editor.text().to_string().parse::<i32>() {
+                                        match conn.reducers().place_bid(bid_amount) {
                                             Ok(()) => input.clear(),
                                             Err(err) => error!("could not request place_bid: {err}"),
                                         }
                                     }
+                                }
+                                event.propagate(false);
+                            })
+                        ),
+                        (
+                            button("fold")
+                            on(move |mut event: On<Pointer<Press>>, conn: Res<StdbConn>| {
+                                if let Err(err) = conn.reducers().withdraw_from_bidding() {
+                                    error!("could not request withdraw_from_bidding: {err}");
                                 }
                                 event.propagate(false);
                             })
@@ -487,7 +508,7 @@ fn spawn_in_game_ui(
                 )
             ]
         })
-        .insert(DespawnOnExit(AppState::InGame));
+        .insert(DespawnOnExit(RoundState::Bidding));
 }
 
 impl TableList for PlayerHand {
@@ -660,7 +681,7 @@ fn handle_game_state(
             .old
             .as_ref()
             .is_none_or(|old| old.state != msg.new.state)
-            .then_some(msg.new.state);
+            .then_some(msg.new.state.clone());
 
         if let Some(new_game_state) = new_game_state {
             match new_game_state {
@@ -676,7 +697,7 @@ fn handle_game_state(
 
                     commands.set_state(AppState::InGame);
                 }
-                module_bindings::GameState::Ended => {
+                module_bindings::GameState::Ended(winner) => {
                     subs.unsubscribe(&SubKey::Seat).ok();
                     subs.unsubscribe(&SubKey::PlayedCard).ok();
                     // XXX: is this needed?
@@ -685,6 +706,32 @@ fn handle_game_state(
 
                     commands.remove_resource::<CurrentGame>();
                     commands.set_state(AppState::MainMenu);
+                }
+            }
+        }
+
+        let new_round_phase = msg
+            .old
+            .as_ref()
+            .is_none_or(|old| old.round_phase != msg.new.round_phase)
+            .then_some(msg.new.round_phase.clone());
+
+        if let Some(new_round_phase) = new_round_phase {
+            match new_round_phase {
+                module_bindings::RoundPhase::Dealing => {}
+                module_bindings::RoundPhase::Bidding => {
+                    // TODO: remove showdown resources
+                    commands.set_state(RoundState::Bidding);
+                }
+                module_bindings::RoundPhase::Negotiation(shaikh_seat_id) => {
+                    // TODO: remove bidding resources
+                    commands.set_state(RoundState::Negotiation);
+                    // TODO:
+                }
+                module_bindings::RoundPhase::Showdown(winner_seat_id) => {
+                    // TODO: remove negotiation resources
+                    commands.set_state(RoundState::Showdown);
+                    // TODO:
                 }
             }
         }
@@ -761,7 +808,7 @@ fn update_credit_text(
     }
 }
 
-fn spawn_players(
+fn spawn_players_biddings(
     mut commands: Commands,
     conn: Res<StdbConn>,
     current_game: Res<CurrentGame>,
@@ -800,7 +847,7 @@ fn spawn_players(
                     (OnlineBidText)
                 ]
             })
-            .insert(DespawnOnExit(AppState::InGame));
+            .insert(DespawnOnExit(RoundState::Bidding));
     }
 }
 
@@ -851,7 +898,7 @@ fn dev_respawn_ui_hotkey(
         AppState::InLobby => commands.run_system_cached(spawn_in_lobby_ui),
         AppState::InGame => {
             commands.run_system_cached(spawn_in_game_ui);
-            commands.run_system_cached(spawn_players);
+            commands.run_system_cached(spawn_players_biddings);
         }
     }
 }

@@ -9,7 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub struct PlacedBid {
     pub seat_id: u64,
     pub game_id: u64,
-    pub bidding_amount: u64,
+    pub bidding_amount: i32,
 }
 
 impl __sdk::InModule for PlacedBid {
@@ -22,7 +22,7 @@ impl __sdk::InModule for PlacedBid {
 pub struct PlacedBidCols {
     pub seat_id: __sdk::__query_builder::Col<PlacedBid, u64>,
     pub game_id: __sdk::__query_builder::Col<PlacedBid, u64>,
-    pub bidding_amount: __sdk::__query_builder::Col<PlacedBid, u64>,
+    pub bidding_amount: __sdk::__query_builder::Col<PlacedBid, i32>,
 }
 
 impl __sdk::__query_builder::HasCols for PlacedBid {

@@ -4,6 +4,7 @@
 #![allow(unused, clippy::all)]
 use super::game_state_type::GameState;
 use super::game_type::Game;
+use super::round_phase_type::RoundPhase;
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 /// Table handle for the table `game`.

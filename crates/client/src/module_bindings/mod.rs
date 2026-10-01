@@ -6,6 +6,9 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+pub mod accept_negotiation_reducer;
+pub mod accepted_split_table;
+pub mod accepted_split_type;
 pub mod card_type;
 pub mod create_game_reducer;
 pub mod deck_type;
@@ -16,6 +19,9 @@ pub mod game_table;
 pub mod game_type;
 pub mod leave_game_reducer;
 pub mod myhand_table;
+pub mod negotiate_a_fold_reducer;
+pub mod negotiated_split_table;
+pub mod negotiated_split_type;
 pub mod place_bid_reducer;
 pub mod placed_bid_table;
 pub mod placed_bid_type;
@@ -26,13 +32,23 @@ pub mod player_hand_type;
 pub mod player_table;
 pub mod player_type;
 pub mod rank_type;
+pub mod reject_negotiation_reducer;
+pub mod rejected_split_table;
+pub mod rejected_split_type;
+pub mod revealed_hands_table;
+pub mod round_phase_type;
 pub mod seat_table;
 pub mod seat_type;
 pub mod start_game_reducer;
+pub mod start_next_round_reducer;
+pub mod start_showdown_reducer;
 pub mod suit_type;
 pub mod withdraw_from_bidding_reducer;
 pub mod withdraw_from_game_reducer;
 
+pub use accept_negotiation_reducer::accept_negotiation;
+pub use accepted_split_table::*;
+pub use accepted_split_type::AcceptedSplit;
 pub use card_type::Card;
 pub use create_game_reducer::create_game;
 pub use deck_type::Deck;
@@ -43,6 +59,9 @@ pub use game_table::*;
 pub use game_type::Game;
 pub use leave_game_reducer::leave_game;
 pub use myhand_table::*;
+pub use negotiate_a_fold_reducer::negotiate_a_fold;
+pub use negotiated_split_table::*;
+pub use negotiated_split_type::NegotiatedSplit;
 pub use place_bid_reducer::place_bid;
 pub use placed_bid_table::*;
 pub use placed_bid_type::PlacedBid;
@@ -53,9 +72,16 @@ pub use player_hand_type::PlayerHand;
 pub use player_table::*;
 pub use player_type::Player;
 pub use rank_type::Rank;
+pub use reject_negotiation_reducer::reject_negotiation;
+pub use rejected_split_table::*;
+pub use rejected_split_type::RejectedSplit;
+pub use revealed_hands_table::*;
+pub use round_phase_type::RoundPhase;
 pub use seat_table::*;
 pub use seat_type::Seat;
 pub use start_game_reducer::start_game;
+pub use start_next_round_reducer::start_next_round;
+pub use start_showdown_reducer::start_showdown;
 pub use suit_type::Suit;
 pub use withdraw_from_bidding_reducer::withdraw_from_bidding;
 pub use withdraw_from_game_reducer::withdraw_from_game;
@@ -68,13 +94,29 @@ pub use withdraw_from_game_reducer::withdraw_from_game;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
+    AcceptNegotiation,
     CreateGame,
     DevStartSolo,
-    EnterGame { game_id: u64 },
+    EnterGame {
+        game_id: u64,
+    },
     LeaveGame,
-    PlaceBid { bidding_amount: u64 },
-    PlayCard { idx: u32 },
-    StartGame { game_id: u64 },
+    NegotiateAFold {
+        seat_negotiatied_with: u64,
+        negotiated_amount: i32,
+    },
+    PlaceBid {
+        bidding_amount: i32,
+    },
+    PlayCard {
+        idx: u32,
+    },
+    RejectNegotiation,
+    StartGame {
+        game_id: u64,
+    },
+    StartNextRound,
+    StartShowdown,
     WithdrawFromBidding,
     WithdrawFromGame,
 }
@@ -86,13 +128,18 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::AcceptNegotiation => "accept_negotiation",
             Reducer::CreateGame => "create_game",
             Reducer::DevStartSolo => "dev_start_solo",
             Reducer::EnterGame { .. } => "enter_game",
             Reducer::LeaveGame => "leave_game",
+            Reducer::NegotiateAFold { .. } => "negotiate_a_fold",
             Reducer::PlaceBid { .. } => "place_bid",
             Reducer::PlayCard { .. } => "play_card",
+            Reducer::RejectNegotiation => "reject_negotiation",
             Reducer::StartGame { .. } => "start_game",
+            Reducer::StartNextRound => "start_next_round",
+            Reducer::StartShowdown => "start_showdown",
             Reducer::WithdrawFromBidding => "withdraw_from_bidding",
             Reducer::WithdrawFromGame => "withdraw_from_game",
             _ => unreachable!(),
@@ -101,6 +148,9 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
+            Reducer::AcceptNegotiation => {
+                __sats::bsatn::to_vec(&accept_negotiation_reducer::AcceptNegotiationArgs {})
+            }
             Reducer::CreateGame => __sats::bsatn::to_vec(&create_game_reducer::CreateGameArgs {}),
             Reducer::DevStartSolo => {
                 __sats::bsatn::to_vec(&dev_start_solo_reducer::DevStartSoloArgs {})
@@ -111,6 +161,13 @@ impl __sdk::Reducer for Reducer {
                 })
             }
             Reducer::LeaveGame => __sats::bsatn::to_vec(&leave_game_reducer::LeaveGameArgs {}),
+            Reducer::NegotiateAFold {
+                seat_negotiatied_with,
+                negotiated_amount,
+            } => __sats::bsatn::to_vec(&negotiate_a_fold_reducer::NegotiateAFoldArgs {
+                seat_negotiatied_with: seat_negotiatied_with.clone(),
+                negotiated_amount: negotiated_amount.clone(),
+            }),
             Reducer::PlaceBid { bidding_amount } => {
                 __sats::bsatn::to_vec(&place_bid_reducer::PlaceBidArgs {
                     bidding_amount: bidding_amount.clone(),
@@ -119,10 +176,19 @@ impl __sdk::Reducer for Reducer {
             Reducer::PlayCard { idx } => {
                 __sats::bsatn::to_vec(&play_card_reducer::PlayCardArgs { idx: idx.clone() })
             }
+            Reducer::RejectNegotiation => {
+                __sats::bsatn::to_vec(&reject_negotiation_reducer::RejectNegotiationArgs {})
+            }
             Reducer::StartGame { game_id } => {
                 __sats::bsatn::to_vec(&start_game_reducer::StartGameArgs {
                     game_id: game_id.clone(),
                 })
+            }
+            Reducer::StartNextRound => {
+                __sats::bsatn::to_vec(&start_next_round_reducer::StartNextRoundArgs {})
+            }
+            Reducer::StartShowdown => {
+                __sats::bsatn::to_vec(&start_showdown_reducer::StartShowdownArgs {})
             }
             Reducer::WithdrawFromBidding => {
                 __sats::bsatn::to_vec(&withdraw_from_bidding_reducer::WithdrawFromBiddingArgs {})
@@ -139,11 +205,15 @@ impl __sdk::Reducer for Reducer {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct DbUpdate {
+    accepted_split: __sdk::TableUpdate<AcceptedSplit>,
     game: __sdk::TableUpdate<Game>,
     myhand: __sdk::TableUpdate<PlayerHand>,
+    negotiated_split: __sdk::TableUpdate<NegotiatedSplit>,
     placed_bid: __sdk::TableUpdate<PlacedBid>,
     played_card: __sdk::TableUpdate<PlayedCard>,
     player: __sdk::TableUpdate<Player>,
+    rejected_split: __sdk::TableUpdate<RejectedSplit>,
+    revealed_hands: __sdk::TableUpdate<PlayerHand>,
     seat: __sdk::TableUpdate<Seat>,
 }
 
@@ -153,12 +223,18 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_update in __sdk::transaction_update_iter_table_updates(raw) {
             match &table_update.table_name[..] {
+                "accepted_split" => db_update
+                    .accepted_split
+                    .append(accepted_split_table::parse_table_update(table_update)?),
                 "game" => db_update
                     .game
                     .append(game_table::parse_table_update(table_update)?),
                 "myhand" => db_update
                     .myhand
                     .append(myhand_table::parse_table_update(table_update)?),
+                "negotiated_split" => db_update
+                    .negotiated_split
+                    .append(negotiated_split_table::parse_table_update(table_update)?),
                 "placed_bid" => db_update
                     .placed_bid
                     .append(placed_bid_table::parse_table_update(table_update)?),
@@ -168,6 +244,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "player" => db_update
                     .player
                     .append(player_table::parse_table_update(table_update)?),
+                "rejected_split" => db_update
+                    .rejected_split
+                    .append(rejected_split_table::parse_table_update(table_update)?),
+                "revealed_hands" => db_update
+                    .revealed_hands
+                    .append(revealed_hands_table::parse_table_update(table_update)?),
                 "seat" => db_update
                     .seat
                     .append(seat_table::parse_table_update(table_update)?),
@@ -197,8 +279,14 @@ impl __sdk::DbUpdate for DbUpdate {
     ) -> AppliedDiff<'_> {
         let mut diff = AppliedDiff::default();
 
+        diff.accepted_split = cache
+            .apply_diff_to_table::<AcceptedSplit>("accepted_split", &self.accepted_split)
+            .with_updates_by_pk(|row| &row.id);
         diff.game = cache
             .apply_diff_to_table::<Game>("game", &self.game)
+            .with_updates_by_pk(|row| &row.id);
+        diff.negotiated_split = cache
+            .apply_diff_to_table::<NegotiatedSplit>("negotiated_split", &self.negotiated_split)
             .with_updates_by_pk(|row| &row.id);
         diff.placed_bid = cache
             .apply_diff_to_table::<PlacedBid>("placed_bid", &self.placed_bid)
@@ -209,10 +297,15 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.player = cache
             .apply_diff_to_table::<Player>("player", &self.player)
             .with_updates_by_pk(|row| &row.identity);
+        diff.rejected_split = cache
+            .apply_diff_to_table::<RejectedSplit>("rejected_split", &self.rejected_split)
+            .with_updates_by_pk(|row| &row.id);
         diff.seat = cache
             .apply_diff_to_table::<Seat>("seat", &self.seat)
             .with_updates_by_pk(|row| &row.id);
         diff.myhand = cache.apply_diff_to_table::<PlayerHand>("myhand", &self.myhand);
+        diff.revealed_hands =
+            cache.apply_diff_to_table::<PlayerHand>("revealed_hands", &self.revealed_hands);
 
         diff
     }
@@ -220,11 +313,17 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "accepted_split" => db_update
+                    .accepted_split
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "game" => db_update
                     .game
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "myhand" => db_update
                     .myhand
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "negotiated_split" => db_update
+                    .negotiated_split
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "placed_bid" => db_update
                     .placed_bid
@@ -234,6 +333,12 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "player" => db_update
                     .player
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "rejected_split" => db_update
+                    .rejected_split
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "revealed_hands" => db_update
+                    .revealed_hands
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "seat" => db_update
                     .seat
@@ -251,11 +356,17 @@ impl __sdk::DbUpdate for DbUpdate {
         let mut db_update = DbUpdate::default();
         for table_rows in raw.tables {
             match &table_rows.table[..] {
+                "accepted_split" => db_update
+                    .accepted_split
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "game" => db_update
                     .game
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "myhand" => db_update
                     .myhand
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "negotiated_split" => db_update
+                    .negotiated_split
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "placed_bid" => db_update
                     .placed_bid
@@ -265,6 +376,12 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "player" => db_update
                     .player
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "rejected_split" => db_update
+                    .rejected_split
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "revealed_hands" => db_update
+                    .revealed_hands
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "seat" => db_update
                     .seat
@@ -284,11 +401,15 @@ impl __sdk::DbUpdate for DbUpdate {
 #[allow(non_snake_case)]
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
+    accepted_split: __sdk::TableAppliedDiff<'r, AcceptedSplit>,
     game: __sdk::TableAppliedDiff<'r, Game>,
     myhand: __sdk::TableAppliedDiff<'r, PlayerHand>,
+    negotiated_split: __sdk::TableAppliedDiff<'r, NegotiatedSplit>,
     placed_bid: __sdk::TableAppliedDiff<'r, PlacedBid>,
     played_card: __sdk::TableAppliedDiff<'r, PlayedCard>,
     player: __sdk::TableAppliedDiff<'r, Player>,
+    rejected_split: __sdk::TableAppliedDiff<'r, RejectedSplit>,
+    revealed_hands: __sdk::TableAppliedDiff<'r, PlayerHand>,
     seat: __sdk::TableAppliedDiff<'r, Seat>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
@@ -303,11 +424,31 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         event: &EventContext,
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
+        callbacks.invoke_table_row_callbacks::<AcceptedSplit>(
+            "accepted_split",
+            &self.accepted_split,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Game>("game", &self.game, event);
         callbacks.invoke_table_row_callbacks::<PlayerHand>("myhand", &self.myhand, event);
+        callbacks.invoke_table_row_callbacks::<NegotiatedSplit>(
+            "negotiated_split",
+            &self.negotiated_split,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<PlacedBid>("placed_bid", &self.placed_bid, event);
         callbacks.invoke_table_row_callbacks::<PlayedCard>("played_card", &self.played_card, event);
         callbacks.invoke_table_row_callbacks::<Player>("player", &self.player, event);
+        callbacks.invoke_table_row_callbacks::<RejectedSplit>(
+            "rejected_split",
+            &self.rejected_split,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<PlayerHand>(
+            "revealed_hands",
+            &self.revealed_hands,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Seat>("seat", &self.seat, event);
     }
 }
@@ -564,19 +705,19 @@ impl __sdk::SubscriptionHandle for SubscriptionHandle {
 /// either a [`DbConnection`] or an [`EventContext`] and operate on either.
 pub trait RemoteDbContext:
     __sdk::DbContext<
-        DbView = RemoteTables,
-        Reducers = RemoteReducers,
-        SubscriptionBuilder = __sdk::SubscriptionBuilder<RemoteModule>,
-    >
+    DbView = RemoteTables,
+    Reducers = RemoteReducers,
+    SubscriptionBuilder = __sdk::SubscriptionBuilder<RemoteModule>,
+>
 {
 }
 impl<
-    Ctx: __sdk::DbContext<
+        Ctx: __sdk::DbContext<
             DbView = RemoteTables,
             Reducers = RemoteReducers,
             SubscriptionBuilder = __sdk::SubscriptionBuilder<RemoteModule>,
         >,
-> RemoteDbContext for Ctx
+    > RemoteDbContext for Ctx
 {
 }
 
@@ -969,19 +1110,27 @@ impl __sdk::SpacetimeModule for RemoteModule {
     type QueryBuilder = __sdk::QueryBuilder;
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
+        accepted_split_table::register_table(client_cache);
         game_table::register_table(client_cache);
         myhand_table::register_table(client_cache);
+        negotiated_split_table::register_table(client_cache);
         placed_bid_table::register_table(client_cache);
         played_card_table::register_table(client_cache);
         player_table::register_table(client_cache);
+        rejected_split_table::register_table(client_cache);
+        revealed_hands_table::register_table(client_cache);
         seat_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
+        "accepted_split",
         "game",
         "myhand",
+        "negotiated_split",
         "placed_bid",
         "played_card",
         "player",
+        "rejected_split",
+        "revealed_hands",
         "seat",
     ];
 }

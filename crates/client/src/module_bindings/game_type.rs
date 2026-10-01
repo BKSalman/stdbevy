@@ -5,12 +5,14 @@
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 use super::game_state_type::GameState;
+use super::round_phase_type::RoundPhase;
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
 pub struct Game {
     pub id: u64,
     pub state: GameState,
+    pub round_phase: RoundPhase,
     pub round_start: u8,
     pub current_seat: u8,
     pub round: u8,
@@ -28,6 +30,7 @@ impl __sdk::InModule for Game {
 pub struct GameCols {
     pub id: __sdk::__query_builder::Col<Game, u64>,
     pub state: __sdk::__query_builder::Col<Game, GameState>,
+    pub round_phase: __sdk::__query_builder::Col<Game, RoundPhase>,
     pub round_start: __sdk::__query_builder::Col<Game, u8>,
     pub current_seat: __sdk::__query_builder::Col<Game, u8>,
     pub round: __sdk::__query_builder::Col<Game, u8>,
@@ -41,6 +44,7 @@ impl __sdk::__query_builder::HasCols for Game {
         GameCols {
             id: __sdk::__query_builder::Col::new(table_name, "id"),
             state: __sdk::__query_builder::Col::new(table_name, "state"),
+            round_phase: __sdk::__query_builder::Col::new(table_name, "round_phase"),
             round_start: __sdk::__query_builder::Col::new(table_name, "round_start"),
             current_seat: __sdk::__query_builder::Col::new(table_name, "current_seat"),
             round: __sdk::__query_builder::Col::new(table_name, "round"),
