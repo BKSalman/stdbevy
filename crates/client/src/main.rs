@@ -13,8 +13,10 @@ use bevy::{
 
 #[cfg(feature = "debug")]
 use bevy_inspector_egui::{
-    bevy_egui::EguiPlugin,
-    quick::{StateInspectorPlugin, WorldInspectorPlugin},
+    DefaultInspectorConfigPlugin,
+    bevy_egui::{EguiContext, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext},
+    bevy_inspector::{ui_for_state, ui_for_world},
+    egui,
 };
 
 use bevy_stdb::prelude::*;
@@ -126,9 +128,8 @@ impl Plugin for AppPlugin {
 
         #[cfg(feature = "debug")]
         app.add_plugins(EguiPlugin::default())
-            .add_plugins(WorldInspectorPlugin::new())
-            .add_plugins(StateInspectorPlugin::<AppState>::default())
-            .add_plugins(StateInspectorPlugin::<RoundState>::default());
+            .add_plugins(DefaultInspectorConfigPlugin)
+            .add_systems(EguiPrimaryContextPass, inspector_panel);
 
         app.init_state::<AppState>().add_sub_state::<RoundState>();
 
@@ -191,6 +192,69 @@ impl Plugin for AppPlugin {
             ),
         );
     }
+}
+
+#[cfg(feature = "debug")]
+fn inspector_panel(world: &mut World) {
+    let egui_context = world
+        .query_filtered::<&mut EguiContext, With<PrimaryEguiContext>>()
+        .single(world);
+
+    let Ok(egui_context) = egui_context else {
+        return;
+    };
+    let mut egui_context = egui_context.clone();
+    let ctx = egui_context.get_mut().clone();
+
+    let window = world
+        .query_filtered::<&Window, With<bevy::window::PrimaryWindow>>()
+        .single(world);
+
+    let Ok(window) = window else {
+        return;
+    };
+    let scale_factor = window.scale_factor();
+    let physical_size = UVec2::new(window.physical_width(), window.physical_height());
+
+    let mut viewport_ui = egui::Ui::new(
+        ctx.clone(),
+        "inspector_viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    );
+
+    let right = egui::Panel::right("inspector")
+        .default_size(150.0)
+        .resizable(true)
+        .show_inside(&mut viewport_ui, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.heading("AppState");
+                ui.push_id("app_state", |ui| ui_for_state::<AppState>(world, ui));
+                ui.separator();
+                ui.heading("RoundState");
+                ui.push_id("round_state", |ui| ui_for_state::<RoundState>(world, ui));
+                ui.separator();
+                ui.collapsing("World", |ui| ui_for_world(world, ui));
+            });
+        })
+        .response
+        .rect
+        .width();
+
+    let occluded = UVec2::new((right * scale_factor) as u32, 0);
+    let size = physical_size.saturating_sub(occluded);
+
+    let mut cameras = world.query_filtered::<&mut Camera, Without<EguiContext>>();
+    let Ok(mut camera) = cameras.single_mut(world) else {
+        return;
+    };
+
+    camera.viewport = (size.x > 0 && size.y > 0).then(|| bevy::camera::Viewport {
+        physical_position: UVec2::ZERO,
+        physical_size: size,
+        ..default()
+    });
 }
 
 fn button(label: impl Into<String>) -> impl Scene {
@@ -552,8 +616,34 @@ impl TableList for PlayerHand {
     }
 }
 
+#[cfg(not(feature = "debug"))]
 fn spawn_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
+}
+
+#[cfg(feature = "debug")]
+fn spawn_camera(
+    mut commands: Commands,
+    mut egui_global_settings: ResMut<bevy_inspector_egui::bevy_egui::EguiGlobalSettings>,
+) {
+    egui_global_settings.auto_create_primary_context = false;
+
+    commands.spawn((Camera2d, IsDefaultUiCamera));
+
+    commands.spawn((
+        PrimaryEguiContext,
+        Camera2d,
+        bevy::camera::visibility::RenderLayers::none(),
+        Camera {
+            order: 1,
+            output_mode: bevy::camera::CameraOutputMode::Write {
+                blend_state: Some(bevy::render::render_resource::BlendState::ALPHA_BLENDING),
+                clear_color: ClearColorConfig::None,
+            },
+            clear_color: ClearColorConfig::Custom(Color::NONE),
+            ..default()
+        },
+    ));
 }
 
 fn main_menu_sub(subs: &mut StdbSubs, me: Identity) {
