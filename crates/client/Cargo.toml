@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy =  "0.19"
+bevy =  { version = "0.19", features = ["system_font_discovery"] }
 spacetimedb-sdk = "2.8.3"
 bevy_stdb = "0.13.0"
 

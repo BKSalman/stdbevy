@@ -62,6 +62,14 @@ pub struct CurrentGame {
     player_count: u8,
 }
 
+#[cfg_attr(feature = "debug", derive(Reflect))]
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct Shaikh(u64);
+
+#[cfg_attr(feature = "debug", derive(Reflect))]
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct RoundWinner(u64);
+
 #[derive(Component, Debug, Default, Clone)]
 pub struct GamesListRoot;
 
@@ -79,6 +87,9 @@ pub struct BidTextInput;
 
 #[derive(Component, Debug, Default, Clone)]
 pub struct BiddingContainer;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct NegotiationTextInput;
 
 #[derive(Component, Debug, Default, Clone)]
 pub struct LocalBidText;
@@ -144,6 +155,7 @@ impl Plugin for AppPlugin {
             OnEnter(RoundState::Bidding),
             (spawn_bidding_ui, spawn_players_biddings),
         );
+        app.add_systems(OnEnter(RoundState::Negotiation), spawn_negotiation_ui);
 
         app.add_plugins((
             TableListPlugin::<Game>::default(),
@@ -295,6 +307,16 @@ fn button(label: impl Into<String>) -> impl Scene {
                 BackgroundColor(Color::srgb(0.15, 0.15, 0.15).lighter(0.1))
             );
         })
+    }
+}
+
+fn text(content: impl Into<String>) -> impl Scene {
+    let content: String = content.into();
+    bsn! {
+        Text::new(content)
+        TextFont {
+            font: bevy::text::FontSourceTemplate::Family("Noto Naskh Arabic")
+        }
     }
 }
 
@@ -575,6 +597,163 @@ fn spawn_bidding_ui(mut commands: Commands, conn: Res<StdbConn>, local_seat: Res
         .insert(DespawnOnExit(RoundState::Bidding));
 }
 
+fn spawn_negotiation_ui(
+    mut commands: Commands,
+    current_game: Res<CurrentGame>,
+    shaikh: Res<Shaikh>,
+    local_seat: Res<LocalSeat>,
+    conn: Res<StdbConn>,
+    local_position: Res<LocalPosition>,
+) {
+    if local_seat.0 == shaikh.0 {
+        commands
+            .spawn_scene(bsn! {
+                Node {
+                    position_type: PositionType::Absolute,
+                    bottom: px(0),
+                    right: px(0),
+                    left: px(0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                }
+                Children [
+                    (
+                        text("أنت الشيخ 🫡")
+                    )
+                ]
+            })
+            .insert(DespawnOnExit(RoundState::Negotiation));
+
+        let seat_count = current_game.player_count.max(1);
+
+        let seats = conn.db().seat();
+
+        for seat in seats
+            .iter()
+            .filter(|seat| seat.game_id == current_game.id && seat.id != shaikh.0)
+        {
+            let player_position = seat.position;
+            let relative =
+                (local_position.0 + seat_count - player_position % seat_count) % seat_count;
+            let (top, bottom, right, left) = match relative {
+                1 => (percent(50.), auto(), auto(), px(0)),
+                2 => (px(0), auto(), auto(), percent(50.)),
+                3 => (percent(50.), auto(), px(0), auto()),
+                _ => (auto(), auto(), auto(), auto()),
+            };
+
+            let player_id = seat.player_id;
+            let seat_id = seat.id;
+
+            commands
+                .spawn_scene(bsn! {
+                    PlayerMarker(player_id)
+                    SeatId(seat_id)
+                    PlayerPosition(player_position)
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top,
+                        bottom,
+                        right,
+                        left,
+                    }
+                    Children [
+                        (
+                            NegotiationTextInput
+                            Node {
+                                border: px(2),
+                            }
+                            BorderColor::from(Color::from(SLATE_300))
+                            EditableText {
+                                visible_width: Option::Some(10.),
+                                visible_lines: Option::Some(1.0),
+                                allow_newlines: false,
+                                max_characters: Option::Some(9),
+                            }
+                            TextFont {
+                                font_size: FontSize::Px(38.),
+                            }
+                            EditableTextFilter::new(|c| c.is_digit(10))
+                            TextLayout::no_wrap()
+                            TextCursorStyle::default()
+                            BackgroundColor(DARK_GREY)
+                        )
+                        (
+                            button("negotiate")
+                            on(move |mut event: On<Pointer<Press>>, mut inputs: Query<&mut EditableText, With<NegotiationTextInput>>, conn: Res<StdbConn>| {
+                                for mut input in &mut inputs {
+                                    if let Ok(bid_amount) = input.editor.text().to_string().parse::<i32>() {
+                                        match conn.reducers().place_bid(bid_amount) {
+                                            Ok(()) => input.clear(),
+                                            Err(err) => error!("could not request place_bid: {err}"),
+                                        }
+                                    }
+                                }
+                                event.propagate(false);
+                            })
+                        ),
+                    ]
+                })
+                .insert(DespawnOnExit(RoundState::Negotiation));
+        }
+    } else {
+        let seat_count = current_game.player_count.max(1);
+
+        let seats = conn.db().seat();
+
+        for seat in seats.iter().filter(|seat| seat.game_id == current_game.id) {
+            let player_position = seat.position;
+            let relative =
+                (local_position.0 + seat_count - player_position % seat_count) % seat_count;
+            let (top, bottom, right, left) = match relative {
+                1 => (percent(50.), auto(), auto(), px(0)),
+                2 => (px(0), auto(), auto(), percent(50.)),
+                3 => (percent(50.), auto(), px(0), auto()),
+                _ => (auto(), auto(), auto(), auto()),
+            };
+
+            let player_id = seat.player_id;
+            let seat_id = seat.id;
+
+            if seat.id == shaikh.0 {
+                commands.spawn_scene(bsn! {
+                    PlayerMarker(player_id)
+                    SeatId(seat_id)
+                    PlayerPosition(player_position)
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top,
+                        bottom,
+                        right,
+                        left,
+                    }
+                    Children [
+                        (
+                            text("الشيخ 🫡")
+                        )
+                    ]
+                })
+            } else {
+                commands.spawn_scene(bsn! {
+                    PlayerMarker(player_id)
+                    SeatId(seat_id)
+                    PlayerPosition(player_position)
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top,
+                        bottom,
+                        right,
+                        left,
+                    }
+                    Children [
+                    ]
+                })
+            }
+            .insert(DespawnOnExit(RoundState::Negotiation));
+        }
+    }
+}
+
 impl TableList for PlayerHand {
     type Accessor = MyhandTableAccessor;
     type Root = PlayerHandRoot;
@@ -810,18 +989,19 @@ fn handle_game_state(
             match new_round_phase {
                 module_bindings::RoundPhase::Dealing => {}
                 module_bindings::RoundPhase::Bidding => {
-                    // TODO: remove showdown resources
+                    commands.remove_resource::<Shaikh>();
+                    commands.remove_resource::<RoundWinner>();
                     commands.set_state(RoundState::Bidding);
                 }
                 module_bindings::RoundPhase::Negotiation(shaikh_seat_id) => {
                     // TODO: remove bidding resources
                     commands.set_state(RoundState::Negotiation);
-                    // TODO:
+                    commands.insert_resource(Shaikh(shaikh_seat_id));
                 }
                 module_bindings::RoundPhase::Showdown(winner_seat_id) => {
-                    // TODO: remove negotiation resources
+                    commands.remove_resource::<Shaikh>();
                     commands.set_state(RoundState::Showdown);
-                    // TODO:
+                    commands.insert_resource(RoundWinner(winner_seat_id));
                 }
             }
         }
