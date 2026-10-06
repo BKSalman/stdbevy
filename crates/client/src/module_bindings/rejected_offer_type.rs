@@ -6,7 +6,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub struct AcceptedSplit {
+pub struct RejectedOffer {
     pub id: u64,
     pub negotiator: u64,
     pub negotiated_with: u64,
@@ -14,25 +14,25 @@ pub struct AcceptedSplit {
     pub negotiated_amount: i32,
 }
 
-impl __sdk::InModule for AcceptedSplit {
+impl __sdk::InModule for RejectedOffer {
     type Module = super::RemoteModule;
 }
 
-/// Column accessor struct for the table `AcceptedSplit`.
+/// Column accessor struct for the table `RejectedOffer`.
 ///
 /// Provides typed access to columns for query building.
-pub struct AcceptedSplitCols {
-    pub id: __sdk::__query_builder::Col<AcceptedSplit, u64>,
-    pub negotiator: __sdk::__query_builder::Col<AcceptedSplit, u64>,
-    pub negotiated_with: __sdk::__query_builder::Col<AcceptedSplit, u64>,
-    pub game_id: __sdk::__query_builder::Col<AcceptedSplit, u64>,
-    pub negotiated_amount: __sdk::__query_builder::Col<AcceptedSplit, i32>,
+pub struct RejectedOfferCols {
+    pub id: __sdk::__query_builder::Col<RejectedOffer, u64>,
+    pub negotiator: __sdk::__query_builder::Col<RejectedOffer, u64>,
+    pub negotiated_with: __sdk::__query_builder::Col<RejectedOffer, u64>,
+    pub game_id: __sdk::__query_builder::Col<RejectedOffer, u64>,
+    pub negotiated_amount: __sdk::__query_builder::Col<RejectedOffer, i32>,
 }
 
-impl __sdk::__query_builder::HasCols for AcceptedSplit {
-    type Cols = AcceptedSplitCols;
+impl __sdk::__query_builder::HasCols for RejectedOffer {
+    type Cols = RejectedOfferCols;
     fn cols(table_name: &'static str) -> Self::Cols {
-        AcceptedSplitCols {
+        RejectedOfferCols {
             id: __sdk::__query_builder::Col::new(table_name, "id"),
             negotiator: __sdk::__query_builder::Col::new(table_name, "negotiator"),
             negotiated_with: __sdk::__query_builder::Col::new(table_name, "negotiated_with"),
@@ -42,20 +42,20 @@ impl __sdk::__query_builder::HasCols for AcceptedSplit {
     }
 }
 
-/// Indexed column accessor struct for the table `AcceptedSplit`.
+/// Indexed column accessor struct for the table `RejectedOffer`.
 ///
 /// Provides typed access to indexed columns for query building.
-pub struct AcceptedSplitIxCols {
-    pub game_id: __sdk::__query_builder::IxCol<AcceptedSplit, u64>,
-    pub id: __sdk::__query_builder::IxCol<AcceptedSplit, u64>,
-    pub negotiated_with: __sdk::__query_builder::IxCol<AcceptedSplit, u64>,
-    pub negotiator: __sdk::__query_builder::IxCol<AcceptedSplit, u64>,
+pub struct RejectedOfferIxCols {
+    pub game_id: __sdk::__query_builder::IxCol<RejectedOffer, u64>,
+    pub id: __sdk::__query_builder::IxCol<RejectedOffer, u64>,
+    pub negotiated_with: __sdk::__query_builder::IxCol<RejectedOffer, u64>,
+    pub negotiator: __sdk::__query_builder::IxCol<RejectedOffer, u64>,
 }
 
-impl __sdk::__query_builder::HasIxCols for AcceptedSplit {
-    type IxCols = AcceptedSplitIxCols;
+impl __sdk::__query_builder::HasIxCols for RejectedOffer {
+    type IxCols = RejectedOfferIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
-        AcceptedSplitIxCols {
+        RejectedOfferIxCols {
             game_id: __sdk::__query_builder::IxCol::new(table_name, "game_id"),
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
             negotiated_with: __sdk::__query_builder::IxCol::new(table_name, "negotiated_with"),
@@ -64,4 +64,4 @@ impl __sdk::__query_builder::HasIxCols for AcceptedSplit {
     }
 }
 
-impl __sdk::__query_builder::CanBeLookupTable for AcceptedSplit {}
+impl __sdk::__query_builder::CanBeLookupTable for RejectedOffer {}

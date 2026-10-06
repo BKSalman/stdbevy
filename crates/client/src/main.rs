@@ -26,11 +26,14 @@ use stdb::*;
 use table_list::{TableList, TableListPlugin, ViewListPlugin};
 
 use crate::module_bindings::{
-    Game, GameTableAccess, GameTableAccessor, MyhandTableAccess, MyhandTableAccessor, PlacedBid,
-    Player, PlayerHand, Seat, SeatTableAccess, SeatTableAccessor, create_game, enter_game,
-    gameQueryTableAccess, leave_game, myhandQueryTableAccess, place_bid,
-    placed_bidQueryTableAccess, played_cardQueryTableAccess, playerQueryTableAccess,
-    seatQueryTableAccess, start_game, withdraw_from_bidding, withdraw_from_game,
+    AcceptedOffer, Game, GameTableAccess, GameTableAccessor, MyhandTableAccess,
+    MyhandTableAccessor, NegotiationOffer, PlacedBid, Player, PlayerHand, RejectedOffer, Seat,
+    SeatTableAccess, SeatTableAccessor, accept_negotiation, accepted_offerQueryTableAccess,
+    create_game, enter_game, gameQueryTableAccess, leave_game, myhandQueryTableAccess,
+    negotiate_a_fold, negotiation_offerQueryTableAccess, place_bid, placed_bidQueryTableAccess,
+    played_cardQueryTableAccess, playerQueryTableAccess, reject_negotiation,
+    rejected_offerQueryTableAccess, seatQueryTableAccess, start_game, withdraw_from_bidding,
+    withdraw_from_game,
 };
 
 #[derive(Component, Debug, Default, Clone)]
@@ -98,7 +101,19 @@ pub struct LocalBidText;
 pub struct OnlineBidText;
 
 #[derive(Component, Debug, Default, Clone)]
-pub struct CreditText;
+pub struct HandScoreText;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct NegotiationPrompt;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct ReceivedNegotiationOffer;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct RejectedNegotiationOffer;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct AcceptedNegotiationOffer;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States, Reflect)]
 enum AppState {
@@ -164,21 +179,32 @@ impl Plugin for AppPlugin {
         ));
 
         app.add_systems(
-            PreUpdate,
+            Update,
             (subscribe_on_connect, despawn_player).run_if(resource_exists::<StdbConn>),
         );
 
         app.add_systems(
             PreUpdate,
             (enter_lobby_when_seated, exit_lobby_when_unseated)
+                .after(StdbSet::Flush)
                 .run_if(resource_exists::<LocalPlayer>),
         );
 
         app.add_systems(
             PreUpdate,
+            (handle_game_state).after(StdbSet::Flush).run_if(
+                resource_exists::<LocalPlayer>
+                    .and_eager(resource_exists::<CurrentGame>)
+                    .and_eager(resource_exists::<LocalSeat>)
+                    .and_eager(resource_exists::<LocalPosition>),
+            ),
+        );
+
+        app.add_systems(
+            Update,
             (
                 update_turn_text,
-                update_credit_text,
+                update_hand_score_text,
                 handle_new_round,
                 handle_placed_bids,
             )
@@ -186,13 +212,9 @@ impl Plugin for AppPlugin {
         );
 
         app.add_systems(
-            PreUpdate,
-            (handle_game_state).run_if(
-                resource_exists::<LocalPlayer>
-                    .and_eager(resource_exists::<CurrentGame>)
-                    .and_eager(resource_exists::<LocalSeat>)
-                    .and_eager(resource_exists::<LocalPosition>),
-            ),
+            Update,
+            (new_negotiation, negotiation_accepted, negotiation_rejected)
+                .run_if(in_state(RoundState::Negotiation)),
         );
 
         #[cfg(debug_assertions)]
@@ -492,10 +514,10 @@ fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
 
 fn spawn_bidding_ui(mut commands: Commands, conn: Res<StdbConn>, local_seat: Res<LocalSeat>) {
     let hands = conn.db().myhand();
-    let credit = hands
+    let hand_score = hands
         .iter()
         .find(|hand| hand.seat_id == local_seat.0)
-        .map(|hand| format!("credit: {}", hand.total_credit))
+        .map(|hand| format!("hand score: {}", hand.total_credit))
         .unwrap_or_default();
 
     commands
@@ -514,8 +536,8 @@ fn spawn_bidding_ui(mut commands: Commands, conn: Res<StdbConn>, local_seat: Res
             }
             Children [
                 (
-                    CreditText
-                    Text::new(credit)
+                    HandScoreText
+                    Text::new(hand_score)
                     TextFont {
                         font_size: FontSize::Px(38.),
                     }
@@ -647,6 +669,7 @@ fn spawn_negotiation_ui(
 
             commands
                 .spawn_scene(bsn! {
+                    NegotiationPrompt
                     PlayerMarker(player_id)
                     SeatId(seat_id)
                     PlayerPosition(player_position)
@@ -660,6 +683,7 @@ fn spawn_negotiation_ui(
                     Children [
                         (
                             NegotiationTextInput
+                            SeatId(seat_id)
                             Node {
                                 border: px(2),
                             }
@@ -680,12 +704,12 @@ fn spawn_negotiation_ui(
                         )
                         (
                             button("negotiate")
-                            on(move |mut event: On<Pointer<Press>>, mut inputs: Query<&mut EditableText, With<NegotiationTextInput>>, conn: Res<StdbConn>| {
-                                for mut input in &mut inputs {
-                                    if let Ok(bid_amount) = input.editor.text().to_string().parse::<i32>() {
-                                        match conn.reducers().place_bid(bid_amount) {
+                            on(move |mut event: On<Pointer<Press>>, mut inputs: Query<(&mut EditableText, &SeatId), With<NegotiationTextInput>>, conn: Res<StdbConn>| {
+                                if let Some((mut input, _)) = inputs.iter_mut().find(|(_, seat)| seat.0 == seat_id) {
+                                    if let Ok(negotiated_amount) = input.editor.text().to_string().parse::<i32>() {
+                                        match conn.reducers().negotiate_a_fold(seat_id, negotiated_amount) {
                                             Ok(()) => input.clear(),
-                                            Err(err) => error!("could not request place_bid: {err}"),
+                                            Err(err) => error!("could not request negotiate_a_fold: {err}"),
                                         }
                                     }
                                 }
@@ -750,6 +774,145 @@ fn spawn_negotiation_ui(
                 })
             }
             .insert(DespawnOnExit(RoundState::Negotiation));
+        }
+    }
+}
+
+fn new_negotiation(
+    mut commands: Commands,
+    shaikh: Res<Shaikh>,
+    local_seat: Res<LocalSeat>,
+    conn: Res<StdbConn>,
+    mut negotiations: ReadInsertMessage<NegotiationOffer>,
+    negotiation_prompts: Query<(Entity, &SeatId), With<NegotiationPrompt>>,
+) {
+    for msg in negotiations.read() {
+        if msg.row.negotiator == local_seat.0 {
+            if let Some((e, _)) = negotiation_prompts
+                .iter()
+                .find(|(_, seat_id)| seat_id.0 == msg.row.negotiated_with)
+            {
+                commands.entity(e).despawn();
+            }
+        } else if msg.row.negotiated_with == local_seat.0 {
+            let negotiated_amount = msg.row.negotiated_amount;
+            commands.spawn_scene(bsn! {
+                ReceivedNegotiationOffer
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: px(0),
+                    left: px(0),
+                    top: px(0),
+                    bottom: px(0),
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                }
+                Children [
+                    (Text::new(format!("الشيخ يعرض عليك {}", negotiated_amount))),
+                    (
+                        Node {
+                            display: Display::Flex,
+                            flex_direction: FlexDirection::Column,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                        }
+                        Children [
+                            (
+                                button("اقبل")
+                                on(|_event: On<Pointer<Press>>, mut commands: Commands, conn: Res<StdbConn>| {
+                                    if let Err(err) = conn.reducers().accept_negotiation() {
+                                        error!("could not request accept_negotiation: {err}");
+                                    }
+                                })
+                            ),
+                            (
+                                button("ارفض")
+                                on(|_event: On<Pointer<Press>>, mut commands: Commands, conn: Res<StdbConn>| {
+                                    if let Err(err) = conn.reducers().reject_negotiation() {
+                                        error!("could not request reject_negotiation: {err}");
+                                    }
+                                })
+                            ),
+                        ]
+                    )
+                ]
+            }).insert(DespawnOnExit(RoundState::Negotiation));
+        }
+    }
+}
+
+fn negotiation_rejected(
+    mut commands: Commands,
+    shaikh: Res<Shaikh>,
+    local_seat: Res<LocalSeat>,
+    conn: Res<StdbConn>,
+    negotiation_offer: Single<Entity, With<ReceivedNegotiationOffer>>,
+    mut rejected_negotiations: ReadInsertMessage<RejectedOffer>,
+) {
+    for msg in rejected_negotiations.read() {
+        if msg.row.negotiated_with == local_seat.0 {
+            let negotiated_amount = msg.row.negotiated_amount;
+            commands.entity(*negotiation_offer).despawn();
+
+            commands
+                .spawn_scene(bsn! {
+                    RejectedNegotiationOffer
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: px(0),
+                        left: px(0),
+                        top: px(0),
+                        bottom: px(0),
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                    }
+                    Children [
+                        (Text::new(format!("الشيخ عرض عليك {} ورفضت عرضه", negotiated_amount))),
+                    ]
+                })
+                .insert(DespawnOnExit(RoundState::Negotiation));
+        }
+    }
+}
+
+fn negotiation_accepted(
+    mut commands: Commands,
+    shaikh: Res<Shaikh>,
+    local_seat: Res<LocalSeat>,
+    conn: Res<StdbConn>,
+    negotiation_offer: Single<Entity, With<ReceivedNegotiationOffer>>,
+    mut accepted_negotiations: ReadInsertMessage<AcceptedOffer>,
+) {
+    for msg in accepted_negotiations.read() {
+        if shaikh.0 == local_seat.0 {}
+
+        if msg.row.negotiated_with == local_seat.0 {
+            let negotiated_amount = msg.row.negotiated_amount;
+            commands.entity(*negotiation_offer).despawn();
+
+            commands
+                .spawn_scene(bsn! {
+                    AcceptedNegotiationOffer
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: px(0),
+                        left: px(0),
+                        top: px(0),
+                        bottom: px(0),
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                    }
+                    Children [
+                        (Text::new(format!("الشيخ عرض عليك {} وقبلت عرضه", negotiated_amount))),
+                    ]
+                })
+                .insert(DespawnOnExit(RoundState::Negotiation));
         }
     }
 }
@@ -854,6 +1017,17 @@ fn subscribe_to_game(subs: &mut StdbSubs, game_id: u64) {
     });
     subs.subscribe_query(SubKey::PlacedBid, move |q| {
         q.from.placed_bid().r#where(|pb| pb.game_id.eq(game_id))
+    });
+    subs.subscribe_query(SubKey::NegotiationOffers, move |q| {
+        q.from
+            .negotiation_offer()
+            .r#where(|n| n.game_id.eq(game_id))
+    });
+    subs.subscribe_query(SubKey::AcceptedOffers, move |q| {
+        q.from.accepted_offer().r#where(|n| n.game_id.eq(game_id))
+    });
+    subs.subscribe_query(SubKey::RejectedOffers, move |q| {
+        q.from.rejected_offer().r#where(|n| n.game_id.eq(game_id))
     });
     // XXX: is this needed?
     subs.subscribe_query(SubKey::PlayerHand, move |q| q.from.myhand());
@@ -1014,8 +1188,7 @@ fn handle_placed_bids(
     current_game: Res<CurrentGame>,
     local_seat_id: Res<LocalSeat>,
     bid_text: Single<Entity, With<LocalBidText>>,
-    online_bid_texts: Query<(&ChildOf, Entity), With<OnlineBidText>>,
-    online_bid_texts_parents: Query<(&PlayerPosition, &SeatId)>,
+    online_bid_texts: Query<(Entity, &PlayerPosition, &SeatId), With<OnlineBidText>>,
 ) {
     for msg in bids.read() {
         if msg.new.game_id != current_game.id {
@@ -1032,21 +1205,13 @@ fn handle_placed_bids(
                 commands
                     .entity(*bid_text)
                     .insert(Text::new(format!("Your bidding: {}", new_bid)));
-            } else {
-                let mut parents_with_text = online_bid_texts.iter().flat_map(|(child, e)| {
-                    Result::<_, bevy::ecs::query::QueryEntityError>::Ok((
-                        e,
-                        online_bid_texts_parents.get(child.parent())?,
-                    ))
-                });
-
-                if let Some((entity, (position, _))) =
-                    parents_with_text.find(|(_e, (_pos, seat))| seat.0 == msg.new.seat_id)
-                {
-                    commands
-                        .entity(entity)
-                        .insert(Text::new(format!("{}'s bidding: {}", position.0, new_bid)));
-                }
+            } else if let Some((entity, position, _)) = online_bid_texts
+                .iter()
+                .find(|(_, _, seat)| seat.0 == msg.new.seat_id)
+            {
+                commands
+                    .entity(entity)
+                    .insert(Text::new(format!("{}'s bidding: {}", position.0, new_bid)));
             }
         }
     }
@@ -1061,11 +1226,11 @@ fn update_turn_text(
     }
 }
 
-fn update_credit_text(
+fn update_hand_score_text(
     mut player_hand: ReadInsertMessage<PlayerHand>,
     local_seat: Res<LocalSeat>,
     mut commands: Commands,
-    credit_text: Single<Entity, With<CreditText>>,
+    hand_score_text: Single<Entity, With<HandScoreText>>,
 ) {
     for msg in player_hand.read() {
         if msg.row.seat_id != local_seat.0 {
@@ -1073,8 +1238,8 @@ fn update_credit_text(
         }
 
         commands
-            .entity(*credit_text)
-            .insert(Text::new(format!("credit: {}", msg.row.total_credit)));
+            .entity(*hand_score_text)
+            .insert(Text::new(format!("hand score: {}", msg.row.total_credit)));
     }
 }
 
@@ -1114,7 +1279,11 @@ fn spawn_players_biddings(
                     left,
                 }
                 Children [
-                    (OnlineBidText)
+                    (
+                        OnlineBidText
+                        SeatId(seat_id)
+                        PlayerPosition(player_position)
+                    )
                 ]
             })
             .insert(DespawnOnExit(RoundState::Bidding));

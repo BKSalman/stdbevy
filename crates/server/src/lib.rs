@@ -148,8 +148,8 @@ pub struct PlacedBid {
     pub bidding_amount: i32,
 }
 
-#[spacetimedb::table(accessor = negotiated_split, public)]
-pub struct NegotiatedSplit {
+#[spacetimedb::table(accessor = negotiation_offer, public)]
+pub struct NegotiationOffer {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
@@ -162,8 +162,8 @@ pub struct NegotiatedSplit {
     pub negotiated_amount: i32,
 }
 
-#[spacetimedb::table(accessor = accepted_split, public)]
-pub struct AcceptedSplit {
+#[spacetimedb::table(accessor = accepted_offer, public)]
+pub struct AcceptedOffer {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
@@ -176,8 +176,8 @@ pub struct AcceptedSplit {
     pub negotiated_amount: i32,
 }
 
-#[spacetimedb::table(accessor = rejected_split, public)]
-pub struct RejectedSplit {
+#[spacetimedb::table(accessor = rejected_offer, public)]
+pub struct RejectedOffer {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
@@ -702,11 +702,11 @@ pub fn negotiate_a_fold(
 
     let mut negotiation_balance = original_bid.bidding_amount;
 
-    for negotiation in ctx.db.negotiated_split().negotiator().filter(seat.id) {
+    for negotiation in ctx.db.negotiation_offer().negotiator().filter(seat.id) {
         negotiation_balance -= negotiation.negotiated_amount;
     }
 
-    for negotiation in ctx.db.accepted_split().negotiator().filter(seat.id) {
+    for negotiation in ctx.db.accepted_offer().negotiator().filter(seat.id) {
         negotiation_balance -= negotiation.negotiated_amount;
     }
 
@@ -714,7 +714,7 @@ pub fn negotiate_a_fold(
         return Err(String::from("negotiated amount is more than bid"));
     }
 
-    ctx.db.negotiated_split().insert(NegotiatedSplit {
+    ctx.db.negotiation_offer().insert(NegotiationOffer {
         id: 0,
         negotiator: seat.id,
         negotiated_with: seat_negotiatied_with.id,
@@ -742,19 +742,19 @@ pub fn accept_negotiation(ctx: &ReducerContext) -> Result<(), String> {
         return Err(String::from("it's not negotiation time"));
     }
 
-    let Some(negotiated_split) = ctx.db.negotiated_split().negotiated_with().find(seat.id) else {
+    let Some(negotiation_offer) = ctx.db.negotiation_offer().negotiated_with().find(seat.id) else {
         return Err(String::from(""));
     };
 
-    ctx.db.accepted_split().insert(AcceptedSplit {
+    ctx.db.accepted_offer().insert(AcceptedOffer {
         id: 0,
-        negotiator: negotiated_split.negotiator,
-        negotiated_with: negotiated_split.negotiated_with,
-        game_id: negotiated_split.game_id,
-        negotiated_amount: negotiated_split.negotiated_amount,
+        negotiator: negotiation_offer.negotiator,
+        negotiated_with: negotiation_offer.negotiated_with,
+        game_id: negotiation_offer.game_id,
+        negotiated_amount: negotiation_offer.negotiated_amount,
     });
 
-    ctx.db.negotiated_split().negotiated_with().delete(seat.id);
+    ctx.db.negotiation_offer().negotiated_with().delete(seat.id);
 
     Ok(())
 }
@@ -776,19 +776,19 @@ pub fn reject_negotiation(ctx: &ReducerContext) -> Result<(), String> {
         return Err(String::from("it's not negotiation time"));
     }
 
-    let Some(negotiated_split) = ctx.db.negotiated_split().negotiated_with().find(seat.id) else {
+    let Some(negotiation_offer) = ctx.db.negotiation_offer().negotiated_with().find(seat.id) else {
         return Err(String::from(""));
     };
 
-    ctx.db.rejected_split().insert(RejectedSplit {
+    ctx.db.rejected_offer().insert(RejectedOffer {
         id: 0,
-        negotiator: negotiated_split.negotiator,
-        negotiated_with: negotiated_split.negotiated_with,
-        game_id: negotiated_split.game_id,
-        negotiated_amount: negotiated_split.negotiated_amount,
+        negotiator: negotiation_offer.negotiator,
+        negotiated_with: negotiation_offer.negotiated_with,
+        game_id: negotiation_offer.game_id,
+        negotiated_amount: negotiation_offer.negotiated_amount,
     });
 
-    ctx.db.negotiated_split().negotiated_with().delete(seat.id);
+    ctx.db.negotiation_offer().negotiated_with().delete(seat.id);
 
     Ok(())
 }
@@ -796,7 +796,7 @@ pub fn reject_negotiation(ctx: &ReducerContext) -> Result<(), String> {
 fn showdown_winner(ctx: &ReducerContext, game: &Game) -> Option<u64> {
     let folded: Vec<u64> = ctx
         .db
-        .accepted_split()
+        .accepted_offer()
         .game_id()
         .filter(game.id)
         .map(|split| split.negotiated_with)
@@ -837,7 +837,7 @@ fn settle_splits(ctx: &ReducerContext, game: &Game, winner: u64) {
         adjust_balance(ctx, bid.seat_id, -bid.bidding_amount);
     }
 
-    for split in ctx.db.accepted_split().game_id().filter(game.id) {
+    for split in ctx.db.accepted_offer().game_id().filter(game.id) {
         pot -= split.negotiated_amount;
         adjust_balance(ctx, split.negotiated_with, split.negotiated_amount);
     }
@@ -871,7 +871,7 @@ pub fn start_showdown(ctx: &ReducerContext) -> Result<(), String> {
         return Err(String::from("it's not negotiation time"));
     }
 
-    if ctx.db.negotiated_split().game_id().filter(game.id).count() != 0 {
+    if ctx.db.negotiation_offer().game_id().filter(game.id).count() != 0 {
         return Err(String::from("all negotiations should be resolved first"));
     }
 
@@ -911,8 +911,8 @@ pub fn start_next_round(ctx: &ReducerContext) -> Result<(), String> {
 
 fn begin_round(ctx: &ReducerContext, mut game: Game) -> Result<(), String> {
     ctx.db.placed_bid().game_id().delete(game.id);
-    ctx.db.accepted_split().game_id().delete(game.id);
-    ctx.db.rejected_split().game_id().delete(game.id);
+    ctx.db.accepted_offer().game_id().delete(game.id);
+    ctx.db.rejected_offer().game_id().delete(game.id);
     ctx.db.played_card().game_id().delete(game.id);
 
     let Some(mut deck) = ctx.db.deck().game_id().find(game.id) else {
