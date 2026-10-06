@@ -32,8 +32,8 @@ use crate::module_bindings::{
     create_game, enter_game, gameQueryTableAccess, leave_game, myhandQueryTableAccess,
     negotiate_a_fold, negotiation_offerQueryTableAccess, place_bid, placed_bidQueryTableAccess,
     played_cardQueryTableAccess, playerQueryTableAccess, reject_negotiation,
-    rejected_offerQueryTableAccess, seatQueryTableAccess, start_game, withdraw_from_bidding,
-    withdraw_from_game,
+    rejected_offerQueryTableAccess, seatQueryTableAccess, start_game, start_showdown,
+    withdraw_from_bidding, withdraw_from_game,
 };
 
 #[derive(Component, Debug, Default, Clone)]
@@ -171,6 +171,7 @@ impl Plugin for AppPlugin {
             (spawn_bidding_ui, spawn_players_biddings),
         );
         app.add_systems(OnEnter(RoundState::Negotiation), spawn_negotiation_ui);
+        app.add_systems(OnEnter(RoundState::Showdown), spawn_showdown_ui);
 
         app.add_plugins((
             TableListPlugin::<Game>::default(),
@@ -476,8 +477,13 @@ impl TableList for Game {
     }
 }
 
-fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
+fn spawn_in_game_ui(
+    mut commands: Commands,
+    current_game: Res<CurrentGame>,
+    local_seat: Res<LocalSeat>,
+) {
     let game = current_game.id;
+    let local_seat = local_seat.0;
     commands
         .spawn_scene(bsn! {
             Node {
@@ -488,6 +494,7 @@ fn spawn_in_game_ui(mut commands: Commands, current_game: Res<CurrentGame>) {
             Children [
                 (
                     Text::new(format!("current game: {}", game))
+                    Text::new(format!("your seat: {}", local_seat))
                 ),
                 (
                     button("withdraw")
@@ -619,6 +626,28 @@ fn spawn_bidding_ui(mut commands: Commands, conn: Res<StdbConn>, local_seat: Res
         .insert(DespawnOnExit(RoundState::Bidding));
 }
 
+fn spawn_showdown_ui(mut commands: Commands, round_winner: Res<RoundWinner>) {
+    let round_winner = round_winner.0;
+    commands
+        .spawn_scene(bsn! {
+            Node {
+                position_type: PositionType::Absolute,
+                right: px(0),
+                left: px(0),
+                top: px(0),
+                bottom: px(0),
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+            }
+            Children [
+                Text::new(format!("{} فاز بالشوط!", round_winner))
+            ]
+        })
+        .insert(DespawnOnExit(RoundState::Showdown));
+}
+
 fn spawn_negotiation_ui(
     mut commands: Commands,
     current_game: Res<CurrentGame>,
@@ -641,6 +670,14 @@ fn spawn_negotiation_ui(
                 Children [
                     (
                         text("أنت الشيخ 🫡")
+                    ),
+                    (
+                        button("داقش")
+                        on(|_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
+                            if let Err(err) = conn.reducers().start_showdown() {
+                                error!("could not request start_showdown: {err}");
+                            }
+                        })
                     )
                 ]
             })

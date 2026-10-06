@@ -4,6 +4,8 @@ use spacetimedb::rand::seq::SliceRandom;
 use spacetimedb::*;
 
 const CARDS_PER_PLAYER: usize = 4;
+/// How long the showdown stays on screen before the next round is dealt.
+const SHOWDOWN_MICROS: i64 = 2_000_000;
 const STARTING_BALANCE: i32 = 10_000;
 
 #[derive(SpacetimeType, Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -188,6 +190,16 @@ pub struct RejectedOffer {
     #[index(btree)]
     pub game_id: u64,
     pub negotiated_amount: i32,
+}
+
+#[spacetimedb::table(accessor = next_round_schedule, scheduled(auto_start_next_round))]
+pub struct NextRoundSchedule {
+    #[primary_key]
+    #[auto_inc]
+    pub scheduled_id: u64,
+    pub scheduled_at: ScheduleAt,
+    #[index(btree)]
+    pub game_id: u64,
 }
 
 #[spacetimedb::table(accessor = played_card, public)]
@@ -576,6 +588,13 @@ fn next_seat(ctx: &ReducerContext, mut game: Game) -> Result<(), String> {
                 game.round_phase = RoundPhase::Showdown {
                     winner: winner_bid.seat_id,
                 };
+
+                ctx.db.next_round_schedule().insert(NextRoundSchedule {
+                    scheduled_id: 0,
+                    scheduled_at: (ctx.timestamp + TimeDuration::from_micros(SHOWDOWN_MICROS))
+                        .into(),
+                    game_id: game.id,
+                });
             }
             _ => {
                 if let Some(shaikh_bid) = bids.iter().max_by_key(|b| b.bidding_amount) {
@@ -882,11 +901,39 @@ pub fn start_showdown(ctx: &ReducerContext) -> Result<(), String> {
     settle_splits(ctx, &game, winner);
 
     // the round rests here so clients can reveal hands through `revealed_hands`;
-    // the bids and splits stay on the table until `start_next_round` clears them
+    // the bids and splits stay on the table until `begin_round` clears them
     game.round_phase = RoundPhase::Showdown { winner };
+    let game_id = game.id;
     ctx.db.game().id().update(game);
 
+    ctx.db.next_round_schedule().insert(NextRoundSchedule {
+        scheduled_id: 0,
+        scheduled_at: (ctx.timestamp + TimeDuration::from_micros(SHOWDOWN_MICROS)).into(),
+        game_id,
+    });
+
     Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn auto_start_next_round(ctx: &ReducerContext, arg: NextRoundSchedule) -> Result<(), String> {
+    if ctx.sender() != ctx.database_identity() {
+        return Err(String::from(
+            "`auto_start_next_round` may only be invoked by the scheduler",
+        ));
+    }
+
+    let Some(game) = ctx.db.game().id().find(arg.game_id) else {
+        return Ok(());
+    };
+
+    if !matches!(game.state, GameState::Playing)
+        || !matches!(game.round_phase, RoundPhase::Showdown { .. })
+    {
+        return Ok(());
+    }
+
+    begin_round(ctx, game)
 }
 
 #[spacetimedb::reducer]
@@ -910,6 +957,7 @@ pub fn start_next_round(ctx: &ReducerContext) -> Result<(), String> {
 }
 
 fn begin_round(ctx: &ReducerContext, mut game: Game) -> Result<(), String> {
+    ctx.db.next_round_schedule().game_id().delete(game.id);
     ctx.db.placed_bid().game_id().delete(game.id);
     ctx.db.accepted_offer().game_id().delete(game.id);
     ctx.db.rejected_offer().game_id().delete(game.id);
