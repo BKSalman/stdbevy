@@ -5,6 +5,7 @@ mod lobby;
 mod menu;
 mod module_bindings;
 mod net;
+mod pause_menu;
 mod player;
 mod state;
 mod stdb;
@@ -15,7 +16,8 @@ use bevy::prelude::*;
 
 use crate::{
     camera::CameraPlugin, dev::DevPlugin, game::GamePlugin, lobby::LobbyPlugin, menu::MenuPlugin,
-    net::NetPlugin, player::PlayerPlugin, state::StatePlugin, stdb::MyStdbPlugin,
+    net::NetPlugin, pause_menu::PauseMenuPlugin, player::PlayerPlugin, state::StatePlugin,
+    stdb::MyStdbPlugin,
 };
 
 fn main() -> AppExit {
@@ -45,6 +47,7 @@ impl Plugin for AppPlugin {
             PlayerPlugin,
             NetPlugin,
             MenuPlugin,
+            PauseMenuPlugin,
             LobbyPlugin,
             GamePlugin,
             DevPlugin,
