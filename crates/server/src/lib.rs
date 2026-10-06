@@ -214,7 +214,7 @@ pub struct PlayedCard {
 }
 
 #[spacetimedb::reducer(init)]
-pub fn init(ctx: &ReducerContext) -> Result<(), String> {
+pub fn init(_ctx: &ReducerContext) -> Result<(), String> {
     log::debug!("Initializing...");
     Ok(())
 }
