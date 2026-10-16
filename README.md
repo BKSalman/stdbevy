@@ -26,11 +26,22 @@ Edits to system and observer bodies can be patched into the running app, so iter
 doesn't mean replaying the game setup. Needs the [dioxus CLI](https://dioxuslabs.com/learn/0.7/CLI/installation):
 
 ```sh
-dx serve --hot-patch --features hotpatching -p client
+touch crates/client/src/main.rs && dx serve --hot-patch -p client --features hotpatching
 ```
 
-Scenes already spawned aren't re-resolved, so pair it with F6 after editing a `spawn_*_ui`
-function.
+The `touch` is not optional. `dx` learns how to link a patch by intercepting rustc, so the client
+has to actually go through a link on startup; if cargo finds the binary fresh it skips the link and
+`dx` fails immediately with `Missing linker args for fat link of 'client'`. Touching the crate root
+forces the relink, and costs ~10s. Run only one `dx serve` at a time, too — several of them share
+the target dir, so whichever loses the race finds everything fresh and fails the same way.
+
+`dx` builds under its own `desktop-dev` profile, so the first run is a full rebuild; after that
+a patch lands in a few seconds without restarting the app or dropping the SpacetimeDB connection.
+
+Already-spawned scenes aren't re-resolved by the patch, so every patch also triggers F6's
+respawn (`respawn_state_ui`): the current `AppState`, `RoundState` and `PauseMenu` UI is
+despawned and its `OnEnter` systems run again, which is what makes an edit to a `spawn_*_ui`
+function show up. Game state lives in the database, so it survives the respawn.
 
 ## License
 

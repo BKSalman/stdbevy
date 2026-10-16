@@ -22,3 +22,6 @@ log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] 
 [features]
 default = ["debug"]
 debug = ["bevy/debug", "bevy/dynamic_linking", "dep:bevy-inspector-egui"]
+# Patch system and observer bodies into the running app. Off by default: it only
+# does anything under `dx serve --hot-patch` (see the README).
+hotpatching = ["bevy/hotpatching"]

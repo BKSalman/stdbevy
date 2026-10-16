@@ -10,14 +10,12 @@ use bevy_inspector_egui::{
 
 
 #[cfg(debug_assertions)]
+use bevy::input::common_conditions::input_just_pressed;
+
+#[cfg(debug_assertions)]
+use crate::pause_menu::PauseMenu;
 #[cfg(debug_assertions)]
 use crate::stdb::StdbConn;
-#[cfg(debug_assertions)]
-use crate::game::{bidding::spawn_players_biddings, spawn_in_game_ui};
-#[cfg(debug_assertions)]
-use crate::lobby::spawn_in_lobby_ui;
-#[cfg(debug_assertions)]
-use crate::menu::spawn_main_menu_ui;
 #[cfg(any(feature = "debug", debug_assertions))]
 use crate::state::*;
 
@@ -95,31 +93,39 @@ pub fn dev_start_solo_hotkey(keys: Res<ButtonInput<KeyCode>>, conn: Res<StdbConn
     }
 }
 
+/// Despawns everything scoped to `S`'s current value and re-runs that value's
+/// `OnEnter` schedule, so the UI it spawns is rebuilt from the current code.
 #[cfg(debug_assertions)]
-pub fn dev_respawn_ui_hotkey(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut commands: Commands,
-    scoped: Query<(Entity, &DespawnOnExit<AppState>)>,
-    state: Res<State<AppState>>,
-) {
-    if !keys.just_pressed(KeyCode::F6) {
+fn restart_state<S: States>(world: &mut World) {
+    let Some(state) = world.get_resource::<State<S>>().map(|s| s.get().clone()) else {
         return;
-    }
+    };
 
-    for (entity, scope) in &scoped {
-        if scope.0 == *state.get() {
-            commands.entity(entity).despawn();
+    let scoped: Vec<Entity> = world
+        .query::<(Entity, &DespawnOnExit<S>)>()
+        .iter(world)
+        .filter(|(_, scope)| scope.0 == state)
+        .map(|(entity, _)| entity)
+        .collect();
+
+    for entity in scoped {
+        // A scoped entity can be the child of another one, and so already gone.
+        if let Ok(entity) = world.get_entity_mut(entity) {
+            entity.despawn();
         }
     }
 
-    match state.get() {
-        AppState::MainMenu => commands.run_system_cached(spawn_main_menu_ui),
-        AppState::InLobby => commands.run_system_cached(spawn_in_lobby_ui),
-        AppState::InGame => {
-            commands.run_system_cached(spawn_in_game_ui);
-            commands.run_system_cached(spawn_players_biddings);
-        }
-    }
+    // States with nothing registered on entry (`PauseMenu::Closed`, say) have no
+    // such schedule; that is not an error here.
+    let _ = world.try_run_schedule(OnEnter(state));
+}
+
+/// Rebuilds the UI of every active state in place, without leaving the state.
+#[cfg(debug_assertions)]
+pub fn respawn_state_ui(world: &mut World) {
+    restart_state::<AppState>(world);
+    restart_state::<RoundState>(world);
+    restart_state::<PauseMenu>(world);
 }
 
 pub struct DevPlugin;
@@ -135,8 +141,19 @@ impl Plugin for DevPlugin {
             Update,
             (
                 dev_start_solo_hotkey.run_if(resource_exists::<StdbConn>),
-                dev_respawn_ui_hotkey,
+                respawn_state_ui.run_if(input_just_pressed(KeyCode::F6)),
             ),
+        );
+
+        // Systems and observers are patched in place, but scenes that are
+        // already spawned are not re-resolved — so rebuild them on every patch,
+        // which is what makes editing a `spawn_*_ui` function show up live.
+        #[cfg(all(debug_assertions, feature = "hotpatching"))]
+        app.add_systems(
+            Update,
+            respawn_state_ui.run_if(bevy::ecs::schedule::common_conditions::on_message::<
+                bevy::ecs::HotPatched,
+            >),
         );
 
         let _ = app;

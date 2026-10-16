@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 
 use crate::module_bindings::*;
+use crate::state::*;
 use crate::stdb::*;
 use crate::table_list::{TableList, TableListPlugin};
 use crate::ui::button;
-use crate::state::*;
 
 #[derive(Component, Debug, Default, Clone)]
 pub struct GamesListRoot;
