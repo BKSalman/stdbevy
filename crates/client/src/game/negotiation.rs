@@ -1,19 +1,21 @@
 use bevy::{
-    color::palettes::{css::DARK_GREY, tailwind::SLATE_300},
     prelude::*,
-    text::{EditableText, EditableTextFilter, TextCursorStyle},
+    ui_widgets::{SliderRange, SliderValue, slider_self_update},
 };
 use bevy_stdb::prelude::*;
 use spacetimedb_sdk::table::TableLike;
 
-use crate::module_bindings::*;
 use crate::player::*;
 use crate::state::*;
 use crate::stdb::*;
 use crate::ui::{button, text};
+use crate::{
+    module_bindings::*,
+    ui::{slider, slider_label},
+};
 
-#[derive(Component, Debug, Default, Clone)]
-pub struct NegotiationTextInput;
+const NEGOTIATION_STEP: f32 = 1000.0;
+const NEGOTIATION_PRECISION: i32 = -3;
 
 #[derive(Component, Debug, Default, Clone)]
 pub struct NegotiationPrompt;
@@ -27,6 +29,43 @@ pub struct RejectedNegotiationOffer;
 #[derive(Component, Debug, Default, Clone)]
 pub struct AcceptedNegotiationOffer;
 
+#[derive(Component, Debug, Default, Clone)]
+pub struct NegotiationSlider;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct NegotiationAmountText;
+
+fn negotiation_bounds(conn: &StdbConn, seat_id: u64) -> (f32, f32) {
+    let bid_amount = conn
+        .db()
+        .placed_bid()
+        .iter()
+        .find(|bid| bid.seat_id == seat_id)
+        .map(|bid| bid.bidding_amount)
+        .unwrap_or_default() as f32;
+
+    let negotiations = conn
+        .db()
+        .negotiation_offer()
+        .iter()
+        .filter(|offer| offer.negotiator == seat_id)
+        .map(|offer| offer.negotiated_amount as f32)
+        .sum::<f32>();
+
+    let accepted_offers = conn
+        .db()
+        .accepted_offer()
+        .iter()
+        .filter(|offer| offer.negotiator == seat_id)
+        .map(|offer| offer.negotiated_amount as f32)
+        .sum::<f32>();
+
+    let max = ((bid_amount - negotiations - accepted_offers) / NEGOTIATION_STEP).floor()
+        * NEGOTIATION_STEP;
+
+    (0.0, max.max(0.0))
+}
+
 pub fn spawn_negotiation_ui(
     mut commands: Commands,
     current_game: Res<CurrentGame>,
@@ -36,6 +75,9 @@ pub fn spawn_negotiation_ui(
     local_position: Res<LocalPosition>,
 ) {
     if local_seat.0 == shaikh.0 {
+        let (min_negotiation, max_negotiation) = negotiation_bounds(&conn, local_seat.0);
+        println!("{max_negotiation}");
+
         commands
             .spawn_scene(bsn! {
                 Node {
@@ -87,6 +129,12 @@ pub fn spawn_negotiation_ui(
                     SeatId(seat_id)
                     PlayerPosition(player_position)
                     Node {
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        padding: px(10),
+                        column_gap: px(10),
                         position_type: PositionType::Absolute,
                         top,
                         bottom,
@@ -94,35 +142,24 @@ pub fn spawn_negotiation_ui(
                         left,
                     }
                     Children [
-                        NegotiationTextInput
+                        NegotiationSlider
                         SeatId(seat_id)
-                        Node {
-                            border: px(2),
-                        }
-                        BorderColor::from(Color::from(SLATE_300))
-                        EditableText {
-                            visible_width: Option::Some(10.),
-                            visible_lines: Option::Some(1.0),
-                            allow_newlines: false,
-                            max_characters: Option::Some(9),
-                        }
+                        @slider(min_negotiation, max_negotiation, min_negotiation, NEGOTIATION_STEP, NEGOTIATION_PRECISION)
+                        on(slider_self_update)
+                        on(slider_label::<NegotiationAmountText>)
+                        --
+                        NegotiationAmountText
+                        @text(format!("{}", min_negotiation as i32))
                         TextFont {
                             font_size: FontSize::Px(38.),
                         }
-                        EditableTextFilter::new(|c| c.is_digit(10))
-                        TextLayout::no_wrap()
-                        TextCursorStyle::default()
-                        BackgroundColor(DARK_GREY)
                         --
                         @button("negotiate")
-                        on(move |mut event: On<PointerPress>, mut inputs: Query<(&mut EditableText, &SeatId), With<NegotiationTextInput>>, conn: Res<StdbConn>| {
-                            if let Some((mut input, _)) = inputs.iter_mut().find(|(_, seat)| seat.0 == seat_id) {
-                                if let Ok(negotiated_amount) = input.editor.text().to_string().parse::<i32>() {
-                                    match conn.reducers().negotiate_a_fold(seat_id, negotiated_amount) {
-                                        Ok(()) => input.clear(),
-                                        Err(err) => error!("could not request negotiate_a_fold: {err}"),
-                                    }
-                                }
+                        on(move |mut event: On<PointerPress>, sliders: Query<(&SliderValue, &SeatId), With<NegotiationSlider>>, conn: Res<StdbConn>| {
+                            if let Some((value, _)) = sliders.iter().find(|(_, seat)| seat.0 == seat_id)
+                                && let Err(err) = conn.reducers().negotiate_a_fold(seat_id, value.0.round() as i32)
+                            {
+                                error!("could not request negotiate_a_fold: {err}");
                             }
                             event.propagate(false);
                         })
@@ -182,6 +219,29 @@ pub fn spawn_negotiation_ui(
                 })
             }
             .insert(DespawnOnExit(RoundState::Negotiation));
+        }
+    }
+}
+
+pub fn update_negotiation_range(
+    mut commands: Commands,
+    conn: Res<StdbConn>,
+    local_seat: Res<LocalSeat>,
+    sliders: Query<(Entity, &SliderRange, &SliderValue), With<NegotiationSlider>>,
+) {
+    let (min, max) = negotiation_bounds(&conn, local_seat.0);
+    let range = SliderRange::new(min, max);
+
+    for (entity, current, value) in sliders.iter() {
+        if *current == range {
+            continue;
+        }
+
+        commands.entity(entity).try_insert(range);
+
+        let clamped = range.clamp(value.0);
+        if clamped != value.0 {
+            commands.entity(entity).try_insert(SliderValue(clamped));
         }
     }
 }
@@ -328,7 +388,12 @@ impl Plugin for NegotiationPlugin {
 
         app.add_systems(
             Update,
-            (new_negotiation, negotiation_accepted, negotiation_rejected)
+            (
+                new_negotiation,
+                negotiation_accepted,
+                negotiation_rejected,
+                update_negotiation_range,
+            )
                 .run_if(in_state(RoundState::Negotiation)),
         );
     }

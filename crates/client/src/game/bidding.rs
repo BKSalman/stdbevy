@@ -1,7 +1,6 @@
 use bevy::{
-    color::palettes::{css::DARK_GREY, tailwind::SLATE_300},
     prelude::*,
-    text::{EditableText, EditableTextFilter, TextCursorStyle},
+    ui_widgets::{SliderRange, SliderValue, slider_self_update},
 };
 use bevy_stdb::prelude::*;
 use spacetimedb_sdk::table::TableLike;
@@ -10,14 +9,47 @@ use crate::module_bindings::*;
 use crate::player::*;
 use crate::state::*;
 use crate::stdb::*;
-use crate::ui::button;
+use crate::ui::{button, slider, slider_label};
 use crate::{
     game::{HandScoreText, PlayerHandRoot},
     ui::text,
 };
 
+const BID_STEP: f32 = 1000.0;
+const BID_PRECISION: i32 = -3;
+
 #[derive(Component, Debug, Default, Clone)]
-pub struct BidTextInput;
+pub struct BidSlider;
+
+#[derive(Component, Debug, Default, Clone)]
+pub struct BidAmountText;
+
+fn bid_bounds(conn: &StdbConn, game_id: u64, seat_id: u64) -> (f32, f32) {
+    let balance = conn
+        .db()
+        .seat()
+        .iter()
+        .find(|seat| seat.id == seat_id)
+        .map(|seat| seat.balance)
+        .unwrap_or_default() as f32;
+
+    let highest = conn
+        .db()
+        .placed_bid()
+        .iter()
+        .filter(|bid| bid.game_id == game_id)
+        .map(|bid| bid.bidding_amount)
+        .max();
+
+    let min = match highest {
+        Some(highest) => ((highest as f32 / BID_STEP).floor() + 1.0) * BID_STEP,
+        None => BID_STEP,
+    };
+
+    let max = (balance / BID_STEP).floor() * BID_STEP;
+
+    (min, max.max(min))
+}
 
 #[derive(Component, Debug, Default, Clone)]
 pub struct BiddingContainer;
@@ -28,7 +60,13 @@ pub struct LocalBidText;
 #[derive(Component, Debug, Default, Clone)]
 pub struct OnlineBidText;
 
-pub fn spawn_bidding_ui(mut commands: Commands, conn: Res<StdbConn>, local_seat: Res<LocalSeat>) {
+pub fn spawn_bidding_ui(
+    mut commands: Commands,
+    conn: Res<StdbConn>,
+    current_game: Res<CurrentGame>,
+    local_seat: Res<LocalSeat>,
+) {
+    let (min_bid, max_bid) = bid_bounds(&conn, current_game.id, local_seat.0);
     let hands = conn.db().myhand();
     let hand_score = hands
         .iter()
@@ -71,34 +109,23 @@ pub fn spawn_bidding_ui(mut commands: Commands, conn: Res<StdbConn>, local_seat:
                     column_gap: px(10),
                 }
                 Children [
-                    Node {
-                        border: px(2),
-                    }
-                    BidTextInput
-                    BorderColor::from(Color::from(SLATE_300))
-                    EditableText {
-                        visible_width: Option::Some(10.),
-                        visible_lines: Option::Some(1.0),
-                        allow_newlines: false,
-                        max_characters: Option::Some(9),
-                    }
+                    @slider(min_bid, max_bid, min_bid, BID_STEP, BID_PRECISION)
+                    BidSlider
+                    on(slider_self_update)
+                    on(slider_label::<BidAmountText>)
+                    --
+                    BidAmountText
+                    @text(format!("{}", min_bid as i32))
                     TextFont {
                         font_size: FontSize::Px(38.),
                     }
-                    EditableTextFilter::new(|c| c.is_digit(10))
-                    TextLayout::no_wrap()
-                    TextCursorStyle::default()
-                    BackgroundColor(DARK_GREY)
                     --
                     @button("bid")
-                    on(move |mut event: On<PointerPress>, mut inputs: Query<&mut EditableText, With<BidTextInput>>, conn: Res<StdbConn>| {
-                        for mut input in &mut inputs {
-                            if let Ok(bid_amount) = input.editor.text().to_string().parse::<i32>() {
-                                match conn.reducers().place_bid(bid_amount) {
-                                    Ok(()) => input.clear(),
-                                    Err(err) => error!("could not request place_bid: {err}"),
-                                }
-                            }
+                    on(move |mut event: On<PointerPress>, sliders: Query<&SliderValue, With<BidSlider>>, conn: Res<StdbConn>| {
+                        if let Ok(value) = sliders.single()
+                            && let Err(err) = conn.reducers().place_bid(value.0.round() as i32)
+                        {
+                            error!("could not request place_bid: {err}");
                         }
                         event.propagate(false);
                     })
@@ -206,6 +233,30 @@ pub fn spawn_players_biddings(
     }
 }
 
+pub fn update_bid_range(
+    mut commands: Commands,
+    conn: Res<StdbConn>,
+    current_game: Res<CurrentGame>,
+    local_seat: Res<LocalSeat>,
+    sliders: Query<(Entity, &SliderRange, &SliderValue), With<BidSlider>>,
+) {
+    let (min, max) = bid_bounds(&conn, current_game.id, local_seat.0);
+    let range = SliderRange::new(min, max);
+
+    for (entity, current, value) in sliders.iter() {
+        if *current == range {
+            continue;
+        }
+
+        commands.entity(entity).insert(range);
+
+        let clamped = range.clamp(value.0);
+        if clamped != value.0 {
+            commands.entity(entity).insert(SliderValue(clamped));
+        }
+    }
+}
+
 pub struct BiddingPlugin;
 impl Plugin for BiddingPlugin {
     fn build(&self, app: &mut App) {
@@ -217,6 +268,11 @@ impl Plugin for BiddingPlugin {
         app.add_systems(
             Update,
             handle_placed_bids.run_if(in_state(AppState::InGame)),
+        );
+
+        app.add_systems(
+            Update,
+            update_bid_range.run_if(in_state(RoundState::Bidding)),
         );
     }
 }
