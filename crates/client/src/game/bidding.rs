@@ -51,85 +51,76 @@ pub fn spawn_bidding_ui(mut commands: Commands, conn: Res<StdbConn>, local_seat:
                 column_gap: px(10),
             }
             Children [
-                (
-                    HandScoreText
-                    text(hand_score)
+                HandScoreText
+                @text(hand_score)
+                TextFont {
+                    font_size: FontSize::Px(38.),
+                }
+                --
+                LocalBidText
+                TextFont {
+                    font_size: FontSize::Px(38.),
+                }
+                --
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    padding: px(10),
+                    column_gap: px(10),
+                }
+                Children [
+                    Node {
+                        border: px(2),
+                    }
+                    BidTextInput
+                    BorderColor::from(Color::from(SLATE_300))
+                    EditableText {
+                        visible_width: Option::Some(10.),
+                        visible_lines: Option::Some(1.0),
+                        allow_newlines: false,
+                        max_characters: Option::Some(9),
+                    }
                     TextFont {
                         font_size: FontSize::Px(38.),
                     }
-                ),
-                (
-                    LocalBidText
-                    TextFont {
-                        font_size: FontSize::Px(38.),
-                    }
-                ),
-                (
-                    Node {
-                        display: Display::Flex,
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        padding: px(10),
-                        column_gap: px(10),
-                    }
-                    Children [
-                        (
-                            Node {
-                                border: px(2),
-                            }
-                            BidTextInput
-                            BorderColor::from(Color::from(SLATE_300))
-                            EditableText {
-                                visible_width: Option::Some(10.),
-                                visible_lines: Option::Some(1.0),
-                                allow_newlines: false,
-                                max_characters: Option::Some(9),
-                            }
-                            TextFont {
-                                font_size: FontSize::Px(38.),
-                            }
-                            EditableTextFilter::new(|c| c.is_digit(10))
-                            TextLayout::no_wrap()
-                            TextCursorStyle::default()
-                            BackgroundColor(DARK_GREY)
-                        ),
-                        (
-                            button("bid")
-                            on(move |mut event: On<Pointer<Press>>, mut inputs: Query<&mut EditableText, With<BidTextInput>>, conn: Res<StdbConn>| {
-                                for mut input in &mut inputs {
-                                    if let Ok(bid_amount) = input.editor.text().to_string().parse::<i32>() {
-                                        match conn.reducers().place_bid(bid_amount) {
-                                            Ok(()) => input.clear(),
-                                            Err(err) => error!("could not request place_bid: {err}"),
-                                        }
-                                    }
+                    EditableTextFilter::new(|c| c.is_digit(10))
+                    TextLayout::no_wrap()
+                    TextCursorStyle::default()
+                    BackgroundColor(DARK_GREY)
+                    --
+                    @button("bid")
+                    on(move |mut event: On<PointerPress>, mut inputs: Query<&mut EditableText, With<BidTextInput>>, conn: Res<StdbConn>| {
+                        for mut input in &mut inputs {
+                            if let Ok(bid_amount) = input.editor.text().to_string().parse::<i32>() {
+                                match conn.reducers().place_bid(bid_amount) {
+                                    Ok(()) => input.clear(),
+                                    Err(err) => error!("could not request place_bid: {err}"),
                                 }
-                                event.propagate(false);
-                            })
-                        ),
-                        (
-                            button("fold")
-                            on(move |mut event: On<Pointer<Press>>, conn: Res<StdbConn>| {
-                                if let Err(err) = conn.reducers().withdraw_from_bidding() {
-                                    error!("could not request withdraw_from_bidding: {err}");
-                                }
-                                event.propagate(false);
-                            })
-                        ),
-                    ]
-                ),
-                (
-                    PlayerHandRoot
-                    Node {
-                        display: Display::Flex,
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        padding: px(10),
-                        column_gap: px(10),
-                    }
-                )
+                            }
+                        }
+                        event.propagate(false);
+                    })
+                    --
+                    @button("fold")
+                    on(move |mut event: On<PointerPress>, conn: Res<StdbConn>| {
+                        if let Err(err) = conn.reducers().withdraw_from_bidding() {
+                            error!("could not request withdraw_from_bidding: {err}");
+                        }
+                        event.propagate(false);
+                    })
+                ]
+                --
+                PlayerHandRoot
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    padding: px(10),
+                    column_gap: px(10),
+                }
             ]
         })
         .insert(DespawnOnExit(RoundState::Bidding));
@@ -206,11 +197,9 @@ pub fn spawn_players_biddings(
                     left,
                 }
                 Children [
-                    (
-                        OnlineBidText
-                        SeatId(seat_id)
-                        PlayerPosition(player_position)
-                    )
+                    OnlineBidText
+                    SeatId(seat_id)
+                    PlayerPosition(player_position)
                 ]
             })
             .insert(DespawnOnExit(RoundState::Bidding));

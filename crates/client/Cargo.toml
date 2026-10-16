@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy =  { version = "0.19", features = ["system_font_discovery"] }
+bevy =  { version = "0.20", features = ["system_font_discovery"] }
 spacetimedb-sdk = "2.8.3"
 bevy_stdb = "0.13.0"
 
@@ -16,12 +16,17 @@ tracing = { version = "0.1", features = [
     "max_level_debug",
     "release_max_level_warn",
 ] }
+# Blocked on Bevy 0.20 support: 0.37 is the latest release and still depends on
+# Bevy 0.19, so enabling `inspector` links two Bevy versions and fails to build.
 bevy-inspector-egui = { version = "0.37.0", optional = true }
 log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
 
 [features]
 default = ["debug"]
-debug = ["bevy/debug", "bevy/dynamic_linking", "dep:bevy-inspector-egui"]
+debug = ["bevy/debug", "bevy/dynamic_linking"]
+# The egui world inspector. Split out of `debug` so that `debug`'s fast dynamic
+# linking stays usable; re-enable once bevy-inspector-egui supports Bevy 0.20.
+inspector = ["debug", "dep:bevy-inspector-egui"]
 # Patch system and observer bodies into the running app. Off by default: it only
 # does anything under `dx serve --hot-patch` (see the README).
 hotpatching = ["bevy/hotpatching"]

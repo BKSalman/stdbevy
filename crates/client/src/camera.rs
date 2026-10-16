@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 
-#[cfg(feature = "debug")]
+#[cfg(feature = "inspector")]
 use bevy_inspector_egui::bevy_egui::PrimaryEguiContext;
 
-#[cfg(not(feature = "debug"))]
+#[cfg(not(feature = "inspector"))]
 pub fn spawn_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
-#[cfg(feature = "debug")]
+#[cfg(feature = "inspector")]
 pub fn spawn_camera(
     mut commands: Commands,
     mut egui_global_settings: ResMut<bevy_inspector_egui::bevy_egui::EguiGlobalSettings>,

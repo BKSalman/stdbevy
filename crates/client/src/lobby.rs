@@ -20,22 +20,19 @@ pub fn spawn_in_lobby_ui(mut commands: Commands, current_game: Res<CurrentGame>)
                 flex_direction: FlexDirection::Row,
             }
             Children [
-                (
-                    button("Start game")
-                    on(move |_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
-                        if let Err(err) = conn.reducers().start_game(current_game) {
-                            error!("could not request leave_game: {err}");
-                        }
-                    })
-                ),
-                (
-                    button("Leave game")
-                    on(|_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
-                        if let Err(err) = conn.reducers().leave_game() {
-                            error!("could not request leave_game: {err}");
-                        }
-                    })
-                )
+                @button("Start game")
+                on(move |_event: On<PointerPress>, conn: Res<StdbConn>| {
+                    if let Err(err) = conn.reducers().start_game(current_game) {
+                        error!("could not request leave_game: {err}");
+                    }
+                })
+                --
+                @button("Leave game")
+                on(|_event: On<PointerPress>, conn: Res<StdbConn>| {
+                    if let Err(err) = conn.reducers().leave_game() {
+                        error!("could not request leave_game: {err}");
+                    }
+                })
             ]
         })
         .insert(DespawnOnExit(AppState::InLobby));
@@ -52,14 +49,13 @@ pub fn players_list(game_id: u64) -> impl Scene {
             row_gap: px(10),
         }
         Children [
-            text(format!("game: #{game_id}")),
-            (
-                PlayersListRoot
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(10),
-                }
-            ),
+            @text(format!("game: #{game_id}"))
+            --
+            PlayersListRoot
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: px(10),
+            }
         ]
     }
 }
@@ -80,7 +76,7 @@ impl TableList for Seat {
                 flex_direction: FlexDirection::Column,
             }
             Children [
-                text(format!("seat: #{seat_id}")),
+                @text(format!("seat: #{seat_id}"))
             ]
         }
     }

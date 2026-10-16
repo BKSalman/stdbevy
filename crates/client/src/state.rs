@@ -18,11 +18,11 @@ pub enum RoundState {
     Showdown,
 }
 
-#[cfg_attr(feature = "debug", derive(Reflect))]
+#[cfg_attr(feature = "inspector", derive(Reflect))]
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct Shaikh(pub u64);
 
-#[cfg_attr(feature = "debug", derive(Reflect))]
+#[cfg_attr(feature = "inspector", derive(Reflect))]
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct RoundWinner(pub u64);
 

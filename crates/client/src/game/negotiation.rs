@@ -47,17 +47,14 @@ pub fn spawn_negotiation_ui(
                     align_items: AlignItems::Center,
                 }
                 Children [
-                    (
-                        text("أنت الشيخ 🫡")
-                    ),
-                    (
-                        button("داقش")
-                        on(|_event: On<Pointer<Press>>, conn: Res<StdbConn>| {
-                            if let Err(err) = conn.reducers().start_showdown() {
-                                error!("could not request start_showdown: {err}");
-                            }
-                        })
-                    )
+                    @text("أنت الشيخ 🫡")
+                    --
+                    @button("داقش")
+                    on(|_event: On<PointerPress>, conn: Res<StdbConn>| {
+                        if let Err(err) = conn.reducers().start_showdown() {
+                            error!("could not request start_showdown: {err}");
+                        }
+                    })
                 ]
             })
             .insert(DespawnOnExit(RoundState::Negotiation));
@@ -97,41 +94,38 @@ pub fn spawn_negotiation_ui(
                         left,
                     }
                     Children [
-                        (
-                            NegotiationTextInput
-                            SeatId(seat_id)
-                            Node {
-                                border: px(2),
-                            }
-                            BorderColor::from(Color::from(SLATE_300))
-                            EditableText {
-                                visible_width: Option::Some(10.),
-                                visible_lines: Option::Some(1.0),
-                                allow_newlines: false,
-                                max_characters: Option::Some(9),
-                            }
-                            TextFont {
-                                font_size: FontSize::Px(38.),
-                            }
-                            EditableTextFilter::new(|c| c.is_digit(10))
-                            TextLayout::no_wrap()
-                            TextCursorStyle::default()
-                            BackgroundColor(DARK_GREY)
-                        )
-                        (
-                            button("negotiate")
-                            on(move |mut event: On<Pointer<Press>>, mut inputs: Query<(&mut EditableText, &SeatId), With<NegotiationTextInput>>, conn: Res<StdbConn>| {
-                                if let Some((mut input, _)) = inputs.iter_mut().find(|(_, seat)| seat.0 == seat_id) {
-                                    if let Ok(negotiated_amount) = input.editor.text().to_string().parse::<i32>() {
-                                        match conn.reducers().negotiate_a_fold(seat_id, negotiated_amount) {
-                                            Ok(()) => input.clear(),
-                                            Err(err) => error!("could not request negotiate_a_fold: {err}"),
-                                        }
+                        NegotiationTextInput
+                        SeatId(seat_id)
+                        Node {
+                            border: px(2),
+                        }
+                        BorderColor::from(Color::from(SLATE_300))
+                        EditableText {
+                            visible_width: Option::Some(10.),
+                            visible_lines: Option::Some(1.0),
+                            allow_newlines: false,
+                            max_characters: Option::Some(9),
+                        }
+                        TextFont {
+                            font_size: FontSize::Px(38.),
+                        }
+                        EditableTextFilter::new(|c| c.is_digit(10))
+                        TextLayout::no_wrap()
+                        TextCursorStyle::default()
+                        BackgroundColor(DARK_GREY)
+                        --
+                        @button("negotiate")
+                        on(move |mut event: On<PointerPress>, mut inputs: Query<(&mut EditableText, &SeatId), With<NegotiationTextInput>>, conn: Res<StdbConn>| {
+                            if let Some((mut input, _)) = inputs.iter_mut().find(|(_, seat)| seat.0 == seat_id) {
+                                if let Ok(negotiated_amount) = input.editor.text().to_string().parse::<i32>() {
+                                    match conn.reducers().negotiate_a_fold(seat_id, negotiated_amount) {
+                                        Ok(()) => input.clear(),
+                                        Err(err) => error!("could not request negotiate_a_fold: {err}"),
                                     }
                                 }
-                                event.propagate(false);
-                            })
-                        ),
+                            }
+                            event.propagate(false);
+                        })
                     ]
                 })
                 .insert(DespawnOnExit(RoundState::Negotiation));
@@ -168,9 +162,7 @@ pub fn spawn_negotiation_ui(
                         left,
                     }
                     Children [
-                        (
-                            text("الشيخ 🫡")
-                        )
+                        @text("الشيخ 🫡")
                     ]
                 })
             } else {
@@ -226,33 +218,29 @@ pub fn new_negotiation(
                     align_items: AlignItems::Center,
                 }
                 Children [
-                    (text(format!("الشيخ يعرض عليك {}", negotiated_amount))),
-                    (
-                        Node {
-                            display: Display::Flex,
-                            flex_direction: FlexDirection::Column,
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                        }
-                        Children [
-                            (
-                                button("اقبل")
-                                on(|_event: On<Pointer<Press>>, _commands: Commands, conn: Res<StdbConn>| {
-                                    if let Err(err) = conn.reducers().accept_negotiation() {
-                                        error!("could not request accept_negotiation: {err}");
-                                    }
-                                })
-                            ),
-                            (
-                                button("ارفض")
-                                on(|_event: On<Pointer<Press>>, _commands: Commands, conn: Res<StdbConn>| {
-                                    if let Err(err) = conn.reducers().reject_negotiation() {
-                                        error!("could not request reject_negotiation: {err}");
-                                    }
-                                })
-                            ),
-                        ]
-                    )
+                    @text(format!("الشيخ يعرض عليك {}", negotiated_amount))
+                    --
+                    Node {
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                    }
+                    Children [
+                        @button("اقبل")
+                        on(|_event: On<PointerPress>, _commands: Commands, conn: Res<StdbConn>| {
+                            if let Err(err) = conn.reducers().accept_negotiation() {
+                                error!("could not request accept_negotiation: {err}");
+                            }
+                        })
+                        --
+                        @button("ارفض")
+                        on(|_event: On<PointerPress>, _commands: Commands, conn: Res<StdbConn>| {
+                            if let Err(err) = conn.reducers().reject_negotiation() {
+                                error!("could not request reject_negotiation: {err}");
+                            }
+                        })
+                    ]
                 ]
             }).insert(DespawnOnExit(RoundState::Negotiation));
         }
@@ -287,7 +275,7 @@ pub fn negotiation_rejected(
                         align_items: AlignItems::Center,
                     }
                     Children [
-                        (text(format!("الشيخ عرض عليك {} ورفضت عرضه", negotiated_amount))),
+                        @text(format!("الشيخ عرض عليك {} ورفضت عرضه", negotiated_amount))
                     ]
                 })
                 .insert(DespawnOnExit(RoundState::Negotiation));
@@ -325,7 +313,7 @@ pub fn negotiation_accepted(
                         align_items: AlignItems::Center,
                     }
                     Children [
-                        (text(format!("الشيخ عرض عليك {} وقبلت عرضه", negotiated_amount))),
+                        @text(format!("الشيخ عرض عليك {} وقبلت عرضه", negotiated_amount))
                     ]
                 })
                 .insert(DespawnOnExit(RoundState::Negotiation));

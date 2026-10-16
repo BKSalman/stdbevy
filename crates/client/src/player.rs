@@ -8,26 +8,26 @@ use crate::stdb::StdbConn;
 #[derive(Component, Debug, Default, Clone)]
 pub struct PlayerMarker(pub Identity);
 
-#[cfg_attr(feature = "debug", derive(Reflect))]
+#[cfg_attr(feature = "inspector", derive(Reflect))]
 #[derive(Component, Debug, Default, Clone)]
 pub struct SeatId(pub u64);
 
-#[cfg_attr(feature = "debug", derive(Reflect))]
+#[cfg_attr(feature = "inspector", derive(Reflect))]
 #[derive(Component, Debug, Default, Clone)]
 pub struct PlayerPosition(pub u8);
 
 #[derive(Resource, Debug, Default, Clone)]
 pub struct LocalPlayer(pub Identity);
 
-#[cfg_attr(feature = "debug", derive(Reflect))]
+#[cfg_attr(feature = "inspector", derive(Reflect))]
 #[derive(Resource, Debug, Default)]
 pub struct LocalSeat(pub u64);
 
-#[cfg_attr(feature = "debug", derive(Reflect))]
+#[cfg_attr(feature = "inspector", derive(Reflect))]
 #[derive(Resource, Debug, Default)]
 pub struct LocalPosition(pub u8);
 
-#[cfg_attr(feature = "debug", derive(Reflect))]
+#[cfg_attr(feature = "inspector", derive(Reflect))]
 #[derive(Resource, Debug, Default, Clone, Copy)]
 pub struct CurrentGame {
     pub id: u64,

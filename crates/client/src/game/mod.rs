@@ -41,28 +41,24 @@ pub fn spawn_in_game_ui(
                 top: px(5),
             }
             Children [
-                (
-                    text(format!("current game: {}", game))
-                    text(format!("your seat: {}", local_seat))
-                ),
-                (
-                    button("withdraw")
-                    on(move |mut event: On<Pointer<Press>>, conn: Res<StdbConn>| {
-                        if let Err(err) = conn.reducers().withdraw_from_game() {
-                            error!("could not request withdraw_from_game: {err}");
-                        }
-                        event.propagate(false);
-                    })
-                ),
-                (
-                    CurrentTurnRoot
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: px(5),
-                        top: px(50),
+                @text(format!("current game: {}", game))
+                @text(format!("your seat: {}", local_seat))
+                --
+                @button("withdraw")
+                on(move |mut event: On<PointerPress>, conn: Res<StdbConn>| {
+                    if let Err(err) = conn.reducers().withdraw_from_game() {
+                        error!("could not request withdraw_from_game: {err}");
                     }
-                    text(format!("current turn: {}", 0))
-                )
+                    event.propagate(false);
+                })
+                --
+                CurrentTurnRoot
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(5),
+                    top: px(50),
+                }
+                @text(format!("current turn: {}", 0))
             ]
         })
         .insert(DespawnOnExit(AppState::InGame));
@@ -89,7 +85,7 @@ impl TableList for PlayerHand {
                         border: px(2),
                     }
                     BorderColor::from(Color::BLACK)
-                    text(card_name)
+                    @text(card_name)
                 }
             })
             .collect();

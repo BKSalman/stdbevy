@@ -18,7 +18,7 @@ pub enum PauseMenu {
     Settings,
 }
 
-#[cfg_attr(feature = "debug", derive(Reflect))]
+#[cfg_attr(feature = "inspector", derive(Reflect))]
 #[derive(Component, Debug, Default, Clone)]
 pub struct VolumeText;
 
@@ -57,46 +57,40 @@ fn panel() -> impl Scene {
 fn spawn_pause_menu(mut commands: Commands) {
     commands
         .spawn_scene(bsn! {
-            overlay()
+            @overlay()
             Children [
-                (
-                    panel()
-                    Children [
-                        text("Menu"),
-                        (
-                            button("Resume")
-                            on(|_event: On<Pointer<Press>>, mut next: ResMut<NextState<PauseMenu>>| {
-                                next.set(PauseMenu::Closed);
-                            })
-                        ),
-                        (
-                            button("Settings")
-                            on(|_event: On<Pointer<Press>>, mut next: ResMut<NextState<PauseMenu>>| {
-                                next.set(PauseMenu::Settings);
-                            })
-                        ),
-                        (
-                            button("Leave game")
-                            on(|_event: On<Pointer<Press>>, conn: Res<StdbConn>, state: Res<State<AppState>>, mut next: ResMut<NextState<PauseMenu>>| {
-                                let request = match state.get() {
-                                    AppState::InLobby => conn.reducers().leave_game(),
-                                    AppState::InGame => conn.reducers().withdraw_from_game(),
-                                    AppState::MainMenu => return,
-                                };
-                                if let Err(err) = request {
-                                    error!("could not request leaving the game: {err}");
-                                }
-                                next.set(PauseMenu::Closed);
-                            })
-                        ),
-                        (
-                            button("Quit")
-                            on(|_event: On<Pointer<Press>>, mut exit: MessageWriter<AppExit>| {
-                                exit.write(AppExit::Success);
-                            })
-                        ),
-                    ]
-                )
+                @panel()
+                Children [
+                    @text("Menu")
+                    --
+                    @button("Resume")
+                    on(|_event: On<PointerPress>, mut next: ResMut<NextState<PauseMenu>>| {
+                        next.set(PauseMenu::Closed);
+                    })
+                    --
+                    @button("Settings")
+                    on(|_event: On<PointerPress>, mut next: ResMut<NextState<PauseMenu>>| {
+                        next.set(PauseMenu::Settings);
+                    })
+                    --
+                    @button("Leave game")
+                    on(|_event: On<PointerPress>, conn: Res<StdbConn>, state: Res<State<AppState>>, mut next: ResMut<NextState<PauseMenu>>| {
+                        let request = match state.get() {
+                            AppState::InLobby => conn.reducers().leave_game(),
+                            AppState::InGame => conn.reducers().withdraw_from_game(),
+                            AppState::MainMenu => return,
+                        };
+                        if let Err(err) = request {
+                            error!("could not request leaving the game: {err}");
+                        }
+                        next.set(PauseMenu::Closed);
+                    })
+                    --
+                    @button("Quit")
+                    on(|_event: On<PointerPress>, mut exit: MessageWriter<AppExit>| {
+                        exit.write(AppExit::Success);
+                    })
+                ]
             ]
         })
         .insert((FocusPolicy::Block, DespawnOnExit(PauseMenu::Root)));
@@ -105,55 +99,48 @@ fn spawn_pause_menu(mut commands: Commands) {
 fn spawn_settings_menu(mut commands: Commands) {
     commands
         .spawn_scene(bsn! {
-            overlay()
+            @overlay()
             Children [
-                (
-                    panel()
+                @panel()
+                Children [
+                    @text("Settings")
+                    --
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: px(12),
+                    }
                     Children [
-                        text("Settings"),
-                        (
-                            Node {
-                                flex_direction: FlexDirection::Row,
-                                align_items: AlignItems::Center,
-                                column_gap: px(12),
-                            }
-                            Children [
-                                (
-                                    button("-")
-                                    on(|_event: On<Pointer<Press>>, mut volume: ResMut<GlobalVolume>| {
-                                        let level = (volume.volume.to_linear() - VOLUME_STEP).max(0.0);
-                                        volume.volume = Volume::Linear(level);
-                                    })
-                                ),
-                                (VolumeText),
-                                (
-                                    button("+")
-                                    on(|_event: On<Pointer<Press>>, mut volume: ResMut<GlobalVolume>| {
-                                        let level = (volume.volume.to_linear() + VOLUME_STEP).min(1.0);
-                                        volume.volume = Volume::Linear(level);
-                                    })
-                                ),
-                            ]
-                        ),
-                        (
-                            button("Toggle fullscreen")
-                            on(|_event: On<Pointer<Press>>, mut window: Single<&mut Window, With<PrimaryWindow>>| {
-                                window.mode = match window.mode {
-                                    WindowMode::Windowed => {
-                                        WindowMode::BorderlessFullscreen(MonitorSelection::Current)
-                                    }
-                                    _ => WindowMode::Windowed,
-                                };
-                            })
-                        ),
-                        (
-                            button("Back")
-                            on(|_event: On<Pointer<Press>>, mut next: ResMut<NextState<PauseMenu>>| {
-                                next.set(PauseMenu::Root);
-                            })
-                        ),
+                        @button("-")
+                        on(|_event: On<PointerPress>, mut volume: ResMut<GlobalVolume>| {
+                            let level = (volume.volume.to_linear() - VOLUME_STEP).max(0.0);
+                            volume.volume = Volume::Linear(level);
+                        })
+                        --
+                        VolumeText
+                        --
+                        @button("+")
+                        on(|_event: On<PointerPress>, mut volume: ResMut<GlobalVolume>| {
+                            let level = (volume.volume.to_linear() + VOLUME_STEP).min(1.0);
+                            volume.volume = Volume::Linear(level);
+                        })
                     ]
-                )
+                    --
+                    @button("Toggle fullscreen")
+                    on(|_event: On<PointerPress>, mut window: Single<&mut Window, With<PrimaryWindow>>| {
+                        window.mode = match window.mode {
+                            WindowMode::Windowed => {
+                                WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+                            }
+                            _ => WindowMode::Windowed,
+                        };
+                    })
+                    --
+                    @button("Back")
+                    on(|_event: On<PointerPress>, mut next: ResMut<NextState<PauseMenu>>| {
+                        next.set(PauseMenu::Root);
+                    })
+                ]
             ]
         })
         .insert((FocusPolicy::Block, DespawnOnExit(PauseMenu::Settings)));

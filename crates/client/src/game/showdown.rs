@@ -18,7 +18,7 @@ pub fn spawn_showdown_ui(mut commands: Commands, round_winner: Res<RoundWinner>)
                 align_items: AlignItems::Center,
             }
             Children [
-                text(format!("{} فاز بالشوط!", round_winner))
+                @text(format!("{} فاز بالشوط!", round_winner))
             ]
         })
         .insert(DespawnOnExit(RoundState::Showdown));

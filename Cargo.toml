@@ -31,3 +31,6 @@ inherits = "release"
 opt-level = "s"
 # Strip all debugging information from the binary to slightly reduce file size.
 strip = "debuginfo"
+
+[patch.crates-io]
+bevy_stdb = { path = "../bevy_stdb" }

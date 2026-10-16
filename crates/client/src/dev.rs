@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-#[cfg(feature = "debug")]
+#[cfg(feature = "inspector")]
 use bevy_inspector_egui::{
     DefaultInspectorConfigPlugin,
     bevy_egui::{EguiContext, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext},
@@ -16,10 +16,10 @@ use bevy::input::common_conditions::input_just_pressed;
 use crate::pause_menu::PauseMenu;
 #[cfg(debug_assertions)]
 use crate::stdb::StdbConn;
-#[cfg(any(feature = "debug", debug_assertions))]
+#[cfg(any(feature = "inspector", debug_assertions))]
 use crate::state::*;
 
-#[cfg(feature = "debug")]
+#[cfg(feature = "inspector")]
 pub fn inspector_panel(world: &mut World) {
     let egui_context = world
         .query_filtered::<&mut EguiContext, With<PrimaryEguiContext>>()
@@ -131,7 +131,7 @@ pub fn respawn_state_ui(world: &mut World) {
 pub struct DevPlugin;
 impl Plugin for DevPlugin {
     fn build(&self, app: &mut App) {
-        #[cfg(feature = "debug")]
+        #[cfg(feature = "inspector")]
         app.add_plugins(EguiPlugin::default())
             .add_plugins(DefaultInspectorConfigPlugin)
             .add_systems(EguiPrimaryContextPass, inspector_panel);
